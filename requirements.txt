@@ -1,1 +1,4 @@
-streamlit opencv-python-headless numpy matplotlib pillow
+streamlit
+opencv-python-headless
+numpy
+pillow
