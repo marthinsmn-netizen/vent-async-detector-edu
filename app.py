@@ -35,7 +35,7 @@ if imagen_camara is not None:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.image(img_camara, caption="Imagen Original")
+        st.image(imagen_camara, caption="Imagen Original")
     
     with col2:
         st.image(bordes, caption="Visión del Algoritmo (Bordes)", clamp=True)
