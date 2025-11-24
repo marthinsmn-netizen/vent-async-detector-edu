@@ -45,7 +45,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
         "peaks": list(),   
         "signal_processed": None,
         "message": ""
-    }
+    }}
 
     # --- Paso 1: Preprocesamiento y Suavizado ---
     # Las señales extraídas de imágenes tienen ruido de cuantización.
