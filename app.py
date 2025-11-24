@@ -38,7 +38,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
         dict: Resultados incluyendo índices de picos, eventos DT, señal suavizada y métricas.
     """
     results = {
-       results = {
+       results == {
         "detected": False,
         "event_count": 0,
         "events": list(), 
