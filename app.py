@@ -40,8 +40,8 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     results = {
         "detected": False,
         "event_count": 0,
-        "events":,  # Corrección: Lista vacía
-        "peaks":,   # Corrección: Lista vacía
+        "events":,  # Lista vacia corregida
+        "peaks":,   # Lista vacia corregida
         "signal_processed": None,
         "message": ""
     }
@@ -97,7 +97,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     dt_threshold_seconds = 1.0 
     dt_threshold_samples = dt_threshold_seconds * sample_rate
     
-    dt_events = # Corrección: Lista vacía
+    dt_events = # Lista vacia corregida
     
     if len(peaks) >= 2:
         for i in range(len(peaks) - 1):
@@ -133,7 +133,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     results["detected"] = len(dt_events) > 0
     
     return results
-# ==========================================
+    # ==========================================
 # BLOQUE 3: Interfaz de Usuario y Flujo Principal
 # ==========================================
 
@@ -173,7 +173,7 @@ def main():
                 # Asumimos que la onda es más brillante o más oscura. 
                 # Aquí tomamos la columna con el píxel más brillante como "y".
                 # Este es un método heurístico rápido.
-                signal_extracted = # Corrección: Lista vacía
+                signal_extracted = # Lista vacia corregida
                 height, width = gray.shape
                 
                 # Recorremos el 80% central del ancho para evitar bordes
