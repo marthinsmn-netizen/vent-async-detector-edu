@@ -43,7 +43,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
         "events":,
         "peaks":,
         "signal_processed": None,
-        "message": ""
+        "message": ":"
     }
 
     # --- Paso 1: Preprocesamiento y Suavizado ---
