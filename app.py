@@ -25,114 +25,135 @@ st.set_page_config(
 def analyze_clinical_metrics(peaks, signal_len, sample_rate):
     """Calcula métricas clínicas básicas (Frecuencia Respiratoria)."""
     if len(peaks) < 2:
-        return {"rr": 0, "cycle_time": 0}
+        return {"rr": 0, "duration": 0}
     
     # Tiempo total analizado en segundos
-    total_time_sec = signal_len / sample_rate
+    total_time_sec = float(signal_len) / float(sample_rate) if sample_rate > 0 else 0.0
     
     # Frecuencia Respiratoria (Respiraciones por Minuto)
-    # Extrapolamos la cantidad de picos al minuto completo
     if total_time_sec > 0:
-        rr = (len(peaks) / total_time_sec) * 60
+        rr = (len(peaks) / total_time_sec) * 60.0
     else:
-        rr = 0
+        rr = 0.0
         
-    return {"rr": int(rr), "duration": total_time_sec}
+    return {"rr": int(round(rr)), "duration": total_time_sec}
+
 
 def analyze_flow_starvation(signal, peaks, sample_rate):
     """
     Detecta Hambre de Flujo (Flow Starvation) analizando la convexidad 
     de la curva de PRESIÓN durante la inspiración.
     """
-    starvation_events =
-    
-    # Solo analizamos si hay picos claros
-    if len(peaks) < 1:
+    starvation_events = []  # inicialización corregida
+
+    # Validaciones básicas
+    signal = np.asarray(signal, dtype=float)
+    if signal.size == 0 or len(peaks) < 1:
         return starvation_events
 
     for p_idx in peaks:
+        p_idx = int(p_idx)
         # Definimos la ventana de inspiración (asumimos que sube antes del pico)
-        # Miramos 0.5 segundos hacia atrás desde el pico
         lookback = int(0.5 * sample_rate)
         start_insp = max(0, p_idx - lookback)
         
         # Segmento inspiratorio (subida)
         segment = signal[start_insp:p_idx]
         
-        if len(segment) < 5:
+        if segment.size < 5:
             continue
             
         # --- Algoritmo de Convexidad ---
-        # 1. Creamos una línea recta ideal desde el inicio hasta el pico
+        # 1. Creamos una línea recta ideal desde el inicio hasta el pico usando valores reales
         x_seg = np.arange(len(segment))
-        y_start = segment
-        y_end = segment[-1]
+        y_start = float(segment[0])
+        y_end = float(segment[-1])
         
-        # Línea recta teórica (y = mx + b)
-        slope = (y_end - y_start) / len(segment)
+        # Línea recta teórica (y = m*x + b)
+        # Usamos len(segment)-1 para evitar división por cero y para que la recta vaya del primer al último punto
+        denom = max(1, (len(segment) - 1))
+        slope = (y_end - y_start) / denom
         ideal_line = slope * x_seg + y_start
         
-        # 2. Calculamos la diferencia (Área bajo la curva vs línea ideal)
-        # Si la señal real está muy por DEBAJO de la línea ideal, es una concavidad (Scooping)
+        # 2. Calculamos la diferencia (línea ideal - señal real)
         diff = ideal_line - segment
-        max_concavity = np.max(diff)
+        max_concavity = float(np.max(diff))
         
-        # Umbral heurístico: Si la concavidad es profunda (hambre de flujo)
-        # Normalizamos respecto a la altura del pico para hacerlo independiente de la escala
-        peak_height = y_end - np.min(signal)
-        if peak_height > 0:
-            normalized_concavity = max_concavity / peak_height
-            
-            # Si hay una "muesca" mayor al 15% de la altura del pico -> Alerta
-            if normalized_concavity > 0.15: 
-                starvation_events.append(p_idx - int(len(segment)/2)) # Marcamos la mitad de la subida
+        # Normalizamos respecto a la altura del pico global para independencia de escala
+        peak_height = y_end - float(np.min(signal))
+        if peak_height <= 0:
+            continue
 
+        normalized_concavity = max_concavity / peak_height
+        
+        # Umbral heurístico de concavidad
+        if normalized_concavity > 0.15:
+            # Marcamos un índice representativo dentro de la subida
+            mark_idx = start_insp + int(len(segment) / 2)
+            starvation_events.append(int(mark_idx))
+
+    # Ordenar y quitar duplicados
+    starvation_events = sorted(set(starvation_events))
     return starvation_events
+
 
 def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     """Detecta Doble Disparo (Fase 2)."""
     signal = np.asarray(signal_data, dtype=float)
     results = {
-        "detected": False, "event_count": 0, "events":, 
-        "peaks":, "signal_processed": None, "message": ""
+        "detected": False,
+        "event_count": 0,
+        "events": [],
+        "peaks": [],
+        "signal_processed": None,
+        "message": ""
     }
 
-    if signal.size == 0: return results
+    if signal.size == 0:
+        results["message"] = "Señal vacía."
+        return results
 
-    # Suavizado
+    # Suavizado (ajustando ventana si la señal es corta)
     try:
         window = 11
+        if window >= signal.size:
+            # ventana impar < tamaño de señal
+            window = signal.size - 1 if (signal.size - 1) % 2 == 1 else signal.size - 2
+            window = max(3, int(window))
         poly = 3
-        smoothed = savgol_filter(signal, window_length=window, polyorder=poly)
-    except:
+        smoothed = savgol_filter(signal, window_length=window, polyorder=min(poly, window-1))
+    except Exception:
         smoothed = signal.copy()
     
     results["signal_processed"] = smoothed
 
-    # Normalización (0 a 1) para consistencia en umbrales
-    sig_min, sig_max = np.min(smoothed), np.max(smoothed)
-    if sig_max - sig_min == 0: return results
+    # Normalización (0 a 1)
+    sig_min, sig_max = float(np.min(smoothed)), float(np.max(smoothed))
+    if sig_max - sig_min == 0:
+        results["message"] = "Señal plana o sin variación detectada."
+        return results
     norm_sig = (smoothed - sig_min) / (sig_max - sig_min)
 
     # Detección de Picos
     prominence_val = max(0.05, 0.6 - (sensitivity * 0.5))
-    min_dist = max(1, int(0.15 * sample_rate)) # 150ms refractario
+    min_dist = max(1, int(0.15 * sample_rate))  # 150 ms refractario aproximado
     
     peaks, _ = find_peaks(norm_sig, prominence=prominence_val, distance=min_dist)
+    peaks = np.asarray(peaks, dtype=int)
     results["peaks"] = peaks.tolist()
 
     # Lógica DT
-    dt_thresh_sec = 0.8 # Umbral temporal para considerar "Doble"
-    dt_events =
+    dt_thresh_sec = 0.8  # Umbral temporal para considerar "Doble"
+    dt_events = []       # inicialización corregida
     
-    if len(peaks) >= 2:
-        for i in range(len(peaks) - 1):
-            t_diff = (peaks[i+1] - peaks[i]) / sample_rate
-            if t_diff < dt_thresh_sec:
+    if peaks.size >= 2:
+        for i in range(peaks.size - 1):
+            t_diff = float(peaks[i+1] - peaks[i]) / float(sample_rate)
+            if 0 < t_diff < dt_thresh_sec:
                 dt_events.append({
-                    "peak1": peaks[i],
-                    "peak2": peaks[i+1],
-                    "time_diff": t_diff
+                    "peak1": int(peaks[i]),
+                    "peak2": int(peaks[i+1]),
+                    "time_diff": float(t_diff)
                 })
 
     results["events"] = dt_events
@@ -140,30 +161,42 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     results["detected"] = len(dt_events) > 0
     return results
 
+
 def analyze_ineffective_efforts(signal_data, major_peaks, sample_rate=50):
     """Detecta Esfuerzos Inefectivos (Fase 3)."""
-    ie_events =
-    if len(major_peaks) < 2: return ie_events
+    ie_events = []  # inicialización corregida
+    signal = np.asarray(signal_data, dtype=float)
+
+    major_peaks_arr = np.asarray(major_peaks, dtype=int)
+    if major_peaks_arr.size < 2 or signal.size == 0:
+        return ie_events
     
-    for i in range(len(major_peaks) - 1):
-        start = major_peaks[i]
-        end = major_peaks[i+1]
+    for i in range(major_peaks_arr.size - 1):
+        start = int(major_peaks_arr[i])
+        end = int(major_peaks_arr[i+1])
         
         # Zona de búsqueda: Exhalación (evitamos el inicio y fin inmediatos)
         interval = end - start
+        if interval <= 3:
+            continue
+
         s_zone = start + int(interval * 0.25)
         e_zone = end - int(interval * 0.15)
         
-        if e_zone <= s_zone: continue
+        if e_zone <= s_zone:
+            continue
         
-        segment = signal_data[s_zone:e_zone]
+        segment = signal[s_zone:e_zone]
+        if segment.size == 0:
+            continue
         
         # Buscamos "micro-picos" con baja prominencia
         micro_peaks, _ = find_peaks(segment, prominence=0.02, width=3)
         
         for mp in micro_peaks:
-            ie_events.append(s_zone + mp)
+            ie_events.append(int(s_zone + int(mp)))
             
+    # Deduplicar y ordenar
     return sorted(list(set(ie_events)))
 
 # ==========================================
@@ -177,15 +210,19 @@ def main():
     # --- Sidebar de Configuración ---
     with st.sidebar:
         st.header("Parámetros Clínicos")
-        curve_type = st.selectbox("Tipo de Curva Analizada", 
-                                ["Flujo (Flow)", "Presión (Pressure/Paw)"],
-                                help="Seleccione qué curva aparece en la foto para activar algoritmos específicos.")
+        curve_type = st.selectbox(
+            "Tipo de Curva Analizada", 
+            ["Flujo (Flow)", "Presión (Pressure/Paw)"],
+            help="Seleccione qué curva aparece en la foto para activar algoritmos específicos."
+        )
         
         st.divider()
         st.header("Ajuste Algorítmico")
         sensibilidad = st.slider("Sensibilidad General", 0.0, 1.0, 0.5)
-        fs_estimada = st.number_input("Escala de Tiempo (px/seg estimados)", 10, 200, 50, 
-                                     help="Ajuste esto si los BPM calculados son irreales.")
+        fs_estimada = int(st.number_input(
+            "Escala de Tiempo (px/seg estimados)", 10, 200, 50,
+            help="Ajuste esto si los BPM calculados son irreales."
+        ))
 
     # --- Entrada de Datos ---
     img_buffer = st.camera_input("📸 Capturar Pantalla del Ventilador")
@@ -201,35 +238,41 @@ def main():
             # Extracción de Señal (Heurística de brillo)
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             h, w = gray.shape
-            signal_raw =
+            signal_raw = []  # inicialización corregida
             # Escaneo central (80% del ancho)
-            for col in range(int(w*0.1), int(w*0.9)):
-                # Buscamos el píxel más brillante/oscuro según contraste
+            start_col = int(w * 0.1)
+            end_col = int(w * 0.9)
+            for col in range(start_col, end_col):
                 col_data = gray[:, col]
-                # Asumimos curva clara sobre fondo oscuro
-                y_val = h - np.argmax(col_data)
+                # Asumimos curva clara sobre fondo oscuro; si es al revés cambiar lógica
+                y_val = int(h - np.argmax(col_data))
                 signal_raw.append(y_val)
             
-            signal_np = np.array(signal_raw)
+            signal_np = np.asarray(signal_raw, dtype=float)
+            if signal_np.size == 0:
+                st.error("No se pudo extraer una señal válida de la imagen.")
+                return
 
             # --- PIPELINE DE ANÁLISIS ---
             
             # 1. Detección Base (Fase 2)
-            analysis = analyze_double_trigger(signal_np, fs_estimada, sensibilidad)
+            analysis = analyze_double_trigger(signal_np, sample_rate=fs_estimada, sensitivity=sensibilidad)
             processed_sig = analysis["signal_processed"]
             major_peaks = analysis["peaks"]
             
             # 2. Detección Contextual (Fase 3 & 4)
-            ie_events =
-            starvation_events =
+            ie_events = []           # inicialización corregida
+            starvation_events = []   # inicialización corregida
             
             # Solo buscamos IE si es Flujo (muescas en exhalación)
             if "Flujo" in curve_type:
-                ie_events = analyze_ineffective_efforts(processed_sig, major_peaks, fs_estimada)
+                ie_events = analyze_ineffective_efforts(processed_sig if processed_sig is not None else signal_np,
+                                                       major_peaks, sample_rate=fs_estimada)
             
             # Solo buscamos Flow Starvation si es Presión (concavidad en inspiración)
             if "Presión" in curve_type:
-                starvation_events = analyze_flow_starvation(processed_sig, major_peaks, fs_estimada)
+                starvation_events = analyze_flow_starvation(processed_sig if processed_sig is not None else signal_np,
+                                                            major_peaks, sample_rate=fs_estimada)
 
             # 3. Métricas Clínicas
             metrics = analyze_clinical_metrics(major_peaks, len(signal_np), fs_estimada)
@@ -243,14 +286,15 @@ def main():
             kpi2.metric("Doble Disparo", analysis["event_count"], 
                        delta="-Riesgo VILI" if analysis["detected"] else "Ok", delta_color="inverse")
             kpi3.metric("Esfuerzos Inefectivos", len(ie_events), 
-                       delta="-Fatiga" if len(ie_events)>0 else "Ok", delta_color="inverse")
+                       delta="-Fatiga" if len(ie_events) > 0 else "Ok", delta_color="inverse")
             kpi4.metric("Hambre de Flujo", len(starvation_events), 
-                       delta="-Asincronía" if len(starvation_events)>0 else "Ok", delta_color="inverse")
+                       delta="-Asincronía" if len(starvation_events) > 0 else "Ok", delta_color="inverse")
 
             # Gráfico Maestro
             fig, ax = plt.subplots(figsize=(12, 5))
-            ax.plot(processed_sig, color='cyan' if "Flujo" in curve_type else 'yellow', 
-                   label=f'Curva de {curve_type}', linewidth=2)
+            plot_sig = processed_sig if processed_sig is not None else signal_np
+            color = 'cyan' if "Flujo" in curve_type else 'yellow'
+            ax.plot(plot_sig, color=color, label=f'Curva de {curve_type}', linewidth=2)
             
             # Fondo oscuro estilo monitor médico
             ax.set_facecolor('#1e1e1e')
@@ -261,26 +305,37 @@ def main():
             
             # Marcadores
             # Picos principales
-            if major_peaks:
-                ax.scatter(major_peaks, processed_sig[major_peaks], color='white', s=80, zorder=5, label='Trigger')
+            if len(major_peaks) > 0:
+                peaks_idx = np.asarray(major_peaks, dtype=int)
+                peaks_y = plot_sig[peaks_idx]
+                ax.scatter(peaks_idx, peaks_y, color='white', s=80, zorder=5, label='Trigger')
 
             # Doble Disparo (Rojo)
             for evt in analysis["events"]:
-                p1, p2 = evt["peak1"], evt["peak2"]
-                ax.plot([p1, p2], [processed_sig[p1], processed_sig[p2]], color='red', linewidth=4, linestyle=':')
-                ax.text(p2, processed_sig[p2]+10, "DT", color='red', fontweight='bold')
+                p1, p2 = int(evt["peak1"]), int(evt["peak2"])
+                # Protección por rango
+                if p1 < 0 or p2 >= plot_sig.size: 
+                    continue
+                ax.plot([p1, p2], [plot_sig[p1], plot_sig[p2]], color='red', linewidth=4, linestyle=':')
+                ax.text(p2, plot_sig[p2] + 10, "DT", color='red', fontweight='bold')
 
             # Esfuerzos Inefectivos (Naranja) - Solo Flujo
-            if ie_events:
-                y_ie = processed_sig[ie_events]
-                ax.scatter(ie_events, y_ie, color='orange', marker='x', s=100, linewidth=3, label='Esfuerzo Inefectivo')
+            if len(ie_events) > 0:
+                ie_idx = np.asarray(ie_events, dtype=int)
+                ie_idx = ie_idx[(ie_idx >= 0) & (ie_idx < plot_sig.size)]
+                if ie_idx.size > 0:
+                    y_ie = plot_sig[ie_idx]
+                    ax.scatter(ie_idx, y_ie, color='orange', marker='x', s=100, linewidth=3, label='Esfuerzo Inefectivo')
 
             # Hambre de Flujo (Magenta) - Solo Presión
-            if starvation_events:
-                y_st = processed_sig[starvation_events]
-                ax.scatter(starvation_events, y_st, color='magenta', marker='v', s=120, label='Hambre de Flujo')
-                for st_idx in starvation_events:
-                    ax.text(st_idx, processed_sig[st_idx]-20, "Flow\nStarvation", color='magenta', ha='center', fontsize=8)
+            if len(starvation_events) > 0:
+                st_idx = np.asarray(starvation_events, dtype=int)
+                st_idx = st_idx[(st_idx >= 0) & (st_idx < plot_sig.size)]
+                if st_idx.size > 0:
+                    y_st = plot_sig[st_idx]
+                    ax.scatter(st_idx, y_st, color='magenta', marker='v', s=120, label='Hambre de Flujo')
+                    for s_i in st_idx:
+                        ax.text(int(s_i), plot_sig[int(s_i)] - 20, "Flow\nStarvation", color='magenta', ha='center', fontsize=8)
 
             # Leyenda
             leg = ax.legend(facecolor='#1e1e1e', edgecolor='white')
@@ -297,6 +352,8 @@ def main():
 
         else:
             st.error("Error procesando la imagen.")
+    else:
+        st.info("Esperando captura de imagen...")
 
 if __name__ == "__main__":
     main()
