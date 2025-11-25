@@ -45,7 +45,6 @@ def analyze_flow_starvation(signal, peaks, sample_rate):
         if segment.size < 5:
             continue
 
-        # Línea ideal y concavidad
         x_seg = np.arange(len(segment))
         y_start = float(segment[0])
         y_end = float(segment[-1])
@@ -88,7 +87,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
         if window >= signal.size:
             window = max(3, signal.size - (2 if signal.size % 2 == 0 else 1))
         poly = 3
-        smoothed = savgol_filter(signal, window_length=window, polyorder=min(poly, window - 1))
+        smoothed = savgol_filter(signal, window_length=window, polyorder=min(poly, window-1))
     except:
         smoothed = signal.copy()
 
@@ -113,11 +112,11 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
 
     if peaks.size >= 2:
         for i in range(peaks.size - 1):
-            t_diff = float(peaks[i + 1] - peaks[i]) / float(sample_rate)
+            t_diff = float(peaks[i+1] - peaks[i]) / float(sample_rate)
             if 0 < t_diff < dt_thresh_sec:
                 dt_events.append({
                     "peak1": int(peaks[i]),
-                    "peak2": int(peaks[i + 1]),
+                    "peak2": int(peaks[i+1]),
                     "time_diff": t_diff
                 })
 
@@ -136,7 +135,7 @@ def analyze_ineffective_efforts(signal_data, major_peaks, sample_rate=50):
 
     for i in range(major_peaks_arr.size - 1):
         start = int(major_peaks_arr[i])
-        end = int(major_peaks_arr[i + 1])
+        end = int(major_peaks_arr[i+1])
 
         interval = end - start
         if interval < 5:
@@ -278,46 +277,27 @@ def main():
                 )
 
             # ==========================================
-            # BLOQUE FS CORREGIDO
+            # BLOQUE FS — CORRECTAMENTE INDENTADO
             # ==========================================
-            # FS (Flow Starvation)
-if len(starvation_events) > 0:
+            if len(starvation_events) > 0:
+                starvation_events = [
+                    i for i in starvation_events
+                    if 0 <= i < len(processed_sig)
+                ]
 
-    # Asegurar índices válidos
-    starvation_events = [
-        i for i in starvation_events 
-        if 0 <= i < len(processed_sig)
-    ]
+                y_fs = processed_sig[starvation_events]
 
-    y_fs = processed_sig[starvation_events]
+                ax.scatter(
+                    starvation_events,
+                    y_fs,
+                    color='magenta',
+                    marker='D',
+                    s=90,
+                    linewidth=2
+                )
 
-    # Dibujar en el gráfico
-    ax.scatter(
-        starvation_events,
-        y_fs,
-        color='magenta',
-        marker='D',
-        s=90,
-        linewidth=2
-    )
+            st.pyplot(fig)
 
-    results = {
-        "detected": True,
-        "event_count": len(starvation_events),
-        "events": starvation_events,
-        "peaks": major_peaks,
-        "signal_processed": processed_sig,
-        "message": "Eventos de hambre de flujo detectados"
-    }
-
-else:
-    results = {
-        "detected": False,
-        "event_count": 0,
-        "events": [],
-        "peaks": major_peaks,
-        "signal_processed": processed_sig,
-        "message": "Sin eventos de hambre de flujo detectados"
-    }
-
-st.pyplot(fig)
+# Ejecutar
+if __name__ == "__main__":
+    main()
