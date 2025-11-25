@@ -22,17 +22,16 @@ st.set_page_config(
 # ==========================================
 # BLOQUE 2: Funciones Core de Procesamiento (Fase 2)
 # ==========================================
-
 def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     """
     Detecta eventos de Doble Disparo en una señal unidimensional de ventilación.
     """
-    # CORRECCIÓN: Usamos un solo '=' para asignar
+    # CORRECCIÓN: Usamos listas vacías y un solo '='
     results = {
         "detected": False,
         "event_count": 0,
-        "events": list ()
-        "peaks": list ()
+        "events":,       # <--- Corregido: Corchetes vacíos
+        "peaks":,        # <--- Corregido: Corchetes vacíos
         "signal_processed": None,
         "message": ""
     }
@@ -72,7 +71,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     dt_threshold_seconds = 1.0 
     dt_threshold_samples = dt_threshold_seconds * sample_rate
     
-    dt_events = # Lista vacía explícita
+    dt_events = # <--- Corregido: Lista vacía explícita
     
     if len(peaks) >= 2:
         for i in range(len(peaks) - 1):
@@ -82,18 +81,22 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
             interval_samples = idx_next - idx_current
             interval_seconds = interval_samples / sample_rate
             
+            # Criterio 1: Proximidad Temporal
             if interval_samples < dt_threshold_samples:
-                segment = norm_sig[idx_current:idx_next]
-                valley_min = np.min(segment)
-                stacking_severity = valley_min 
                 
-                event_data = {
-                    "peak1": idx_current,
-                    "peak2": idx_next,
-                    "interval_sec": interval_seconds,
-                    "stacking_idx": stacking_severity
-                }
-                dt_events.append(event_data)
+                # Criterio 2: Análisis del Valle (Breath Stacking)
+                segment = norm_sig[idx_current:idx_next]
+                if len(segment) > 0:
+                    valley_min = np.min(segment)
+                    stacking_severity = valley_min 
+                    
+                    event_data = {
+                        "peak1": idx_current,
+                        "peak2": idx_next,
+                        "interval_sec": interval_seconds,
+                        "stacking_idx": stacking_severity
+                    }
+                    dt_events.append(event_data)
 
     results["events"] = dt_events
     results["event_count"] = len(dt_events)
