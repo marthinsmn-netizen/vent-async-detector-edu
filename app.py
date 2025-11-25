@@ -3,7 +3,7 @@ import streamlit as st
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import find_peaks, savgol_filter, peak_prominences
 import matplotlib
 
 # Usar backend no interactivo para evitar errores de hilos en servidor
@@ -126,19 +126,20 @@ def extract_signal_from_image(gray, col_start_ratio=0.1, col_end_ratio=0.9, inve
     signal = np.array(signal, dtype=float)
     return signal
 
-def robust_smooth(signal, window=11, poly=3):
+def robust_smooth(signal_array, window=11, poly=3):
     """Savitzky-Golay with safe window sizing, plus light gaussian if desired."""
-    n = len(signal)
+    n = len(signal_array)
     if n < 5:
-        return signal.copy()
+        return signal_array.copy()
     win = int(window)
     if win >= n:
+        # choose nearest valid odd window < n
         win = n - 1 if (n - 1) % 2 == 1 else n - 2
     win = max(3, win if win % 2 == 1 else win - 1)
     try:
-        sg = savgol_filter(signal, window_length=win, polyorder=min(poly, win-1))
+        sg = savgol_filter(signal_array, window_length=win, polyorder=min(poly, win-1))
     except Exception:
-        sg = signal.copy()
+        sg = signal_array.copy()
     # small gaussian blur for extra smoothing
     kern = np.exp(-0.5 * (np.linspace(-1, 1, 5) ** 2) / (0.2 ** 2))
     kern = kern / np.sum(kern)
@@ -149,12 +150,12 @@ def robust_smooth(signal, window=11, poly=3):
 # ONSET / OFFSET DETECTION
 # =========================
 
-def detect_onset(signal, peak_idx, fs, back_search_sec=0.5, slope_thresh_rel=0.2):
+def detect_onset(signal_array, peak_idx, fs, back_search_sec=0.5, slope_thresh_rel=0.2):
     """Detecta inicio de inspiración (onset) antes de un pico."""
-    n = len(signal)
+    n = len(signal_array)
     back_samples = int(back_search_sec * fs)
     start = max(0, peak_idx - back_samples)
-    seg = signal[start:peak_idx+1]
+    seg = signal_array[start:peak_idx+1]
     if seg.size < 3:
         return start
     deriv = np.gradient(seg)
@@ -166,12 +167,12 @@ def detect_onset(signal, peak_idx, fs, back_search_sec=0.5, slope_thresh_rel=0.2
             return onset
     return start
 
-def detect_offset(signal, peak_idx, fs, forward_search_sec=1.0, slope_thresh_rel=0.05):
+def detect_offset(signal_array, peak_idx, fs, forward_search_sec=1.0, slope_thresh_rel=0.05):
     """Detecta fin de inspiración (offset) despues del pico."""
-    n = len(signal)
+    n = len(signal_array)
     fwd_samples = int(forward_search_sec * fs)
     end = min(n-1, peak_idx + fwd_samples)
-    seg = signal[peak_idx:end+1]
+    seg = signal_array[peak_idx:end+1]
     if seg.size < 3:
         return end
     deriv = np.gradient(seg)
@@ -184,10 +185,10 @@ def detect_offset(signal, peak_idx, fs, forward_search_sec=1.0, slope_thresh_rel
 # EVENT DETECTION (B, C, D)
 # =========================
 
-def detect_ineffective_efforts(signal, major_peaks, fs):
+def detect_ineffective_efforts(signal_array, major_peaks, fs):
     """Detecta esfuerzos inefectivos: micro picos en la fase espiratoria."""
     ie_events = []
-    sig = np.asarray(signal, dtype=float)
+    sig = np.asarray(signal_array, dtype=float)
     if len(major_peaks) < 2 or sig.size == 0:
         return ie_events
 
@@ -212,10 +213,10 @@ def detect_ineffective_efforts(signal, major_peaks, fs):
                 ie_events.append(int(global_idx))
     return sorted(list(set(ie_events)))
 
-def detect_auto_trigger(signal, major_peaks, fs):
+def detect_auto_trigger(signal_array, major_peaks, fs):
     """Detecta auto-triggering: intervalos cortos y amplitudes pequeñas."""
     at_events = []
-    sig = np.asarray(signal, dtype=float)
+    sig = np.asarray(signal_array, dtype=float)
     if len(major_peaks) < 4:
         return at_events
     intervals = np.diff(np.array(major_peaks))
@@ -228,19 +229,19 @@ def detect_auto_trigger(signal, major_peaks, fs):
                 at_events.append(int(major_peaks[i]))
     return sorted(list(set(at_events)))
 
-def detect_trigger_delay(signal, major_peaks, fs, delay_threshold_sec=0.15):
+def detect_trigger_delay(signal_array, major_peaks, fs, delay_threshold_sec=0.15):
     """Detecta trigger delay: tiempo excesivo entre onset y pico."""
     td_events = []
     if len(major_peaks) < 1:
         return td_events
     for p in major_peaks:
-        onset = detect_onset(signal, p, fs, back_search_sec=0.6)
+        onset = detect_onset(signal_array, p, fs, back_search_sec=0.6)
         onset_to_peak = (p - onset) / fs
         if onset_to_peak > delay_threshold_sec:
             td_events.append({"peak": int(p), "onset": int(onset), "delay_s": float(onset_to_peak)})
     return td_events
 
-def detect_cycling_issues(signal, major_peaks, fs):
+def detect_cycling_issues(signal_array, major_peaks, fs):
     """Detecta ciclado prematuro/tardío comparando Ti."""
     issues = []
     if len(major_peaks) < 2:
@@ -249,8 +250,8 @@ def detect_cycling_issues(signal, major_peaks, fs):
     median_cycle = np.median(cycles)
     for i in range(len(major_peaks)-1):
         p = int(major_peaks[i])
-        onset = detect_onset(signal, p, fs)
-        offset = detect_offset(signal, p, fs)
+        onset = detect_onset(signal_array, p, fs)
+        offset = detect_offset(signal_array, p, fs)
         Ti = (offset - onset) / fs if offset > onset else 0.0
         Ti_ratio = Ti / median_cycle if median_cycle > 0 else 0.0
         if Ti_ratio < 0.6:
@@ -258,6 +259,113 @@ def detect_cycling_issues(signal, major_peaks, fs):
         elif Ti_ratio > 1.4:
             issues.append({"type":"Tardio","peak":p,"Ti_s":Ti,"Ti_ratio":Ti_ratio})
     return issues
+
+# =========================
+# ALGORITMO MEJORADO (INTEGRACIÓN)
+# =========================
+
+def analyze_asynchronies(sig, fs, prom_main=0.25, ie_scale=0.5):
+    """
+    Algoritmo avanzado integrado:
+    - Detecta Double Trigger (DT)
+    - Ineffective Effort (IE)
+    - Flow Starvation (FS)
+    - Auto-Trigger (AT)
+    """
+    out = {
+        "double_trigger": [],        # list of (peak1, peak2)
+        "ineffective_efforts": [],   # list of peak indices
+        "flow_starvation": [],       # list of peak indices
+        "auto_trigger": [],          # list of peak indices
+        "peaks": []
+    }
+
+    if sig is None or len(sig) < 10:
+        return out
+
+    # --- Suavizado seguro ---
+    L = len(sig)
+    win = 21
+    if win >= L:
+        win = L - 1 if (L - 1) % 2 == 1 else L - 2
+    win = max(5, win if win % 2 == 1 else win - 1)
+    try:
+        sm = savgol_filter(sig, window_length=win, polyorder=3)
+    except Exception:
+        sm = sig.copy()
+
+    # --- Picos principales ---
+    min_dist = max(1, int(0.12 * fs))
+    peaks, _ = find_peaks(sm, prominence=prom_main, distance=min_dist)
+    out["peaks"] = peaks.tolist()
+
+    if len(peaks) < 2:
+        return out
+
+    # RR intervals (s)
+    rr_int = np.diff(peaks) / float(fs)
+    avg_rr = float(np.median(rr_int)) if rr_int.size > 0 else 1.0
+    dt_threshold = max(0.25 * avg_rr, 0.25)  # conservative lower bound
+
+    # prominences for IE detection
+    promins = peak_prominences(sm, peaks)[0] if len(peaks) > 0 else np.array([])
+
+    # --- Double Trigger: temporal + valley retention ---
+    for i in range(len(peaks)-1):
+        t1 = int(peaks[i])
+        t2 = int(peaks[i+1])
+        delta_s = (t2 - t1) / float(fs)
+        if delta_s < dt_threshold:
+            if (t2 - t1) > 2:
+                valley = np.min(sm[t1:t2])
+                peak1_amp = max(1e-6, sm[t1])
+                drop_ratio = (peak1_amp - valley) / peak1_amp
+                # if drop_ratio small -> no real exhalation -> DT
+                if drop_ratio < 0.35:
+                    out["double_trigger"].append((t1, t2))
+
+    # --- Ineffective Efforts: low prominences and temporal plausibility ---
+    thr_ie = prom_main * ie_scale
+    for idx, pk in enumerate(peaks):
+        p = int(pk)
+        prom_val = float(promins[idx]) if idx < len(promins) else np.inf
+        if prom_val < thr_ie:
+            # Ensure not adjacent to other peaks (avoid labeling noise)
+            left_gap = (p - peaks[idx-1]) / fs if idx > 0 else np.inf
+            if left_gap > 0.25:  # at least 250 ms since prior peak
+                out["ineffective_efforts"].append(p)
+
+    # --- Flow Starvation: low initial slope on inspiration ---
+    for i in range(len(peaks)-1):
+        p = int(peaks[i])
+        q = int(peaks[i+1])
+        seg = sm[p:q] if q > p + 5 else None
+        if seg is None or len(seg) < 8:
+            continue
+        # take first third to estimate rise slope
+        nsel = max(3, len(seg)//3)
+        x = np.arange(nsel)
+        try:
+            slope = np.polyfit(x, seg[:nsel], 1)[0]
+        except Exception:
+            slope = 0.0
+        # slope small -> starvation (heuristic)
+        if slope < (0.02 * np.max(np.abs(sm)) + 1e-9):
+            out["flow_starvation"].append(p)
+
+    # --- Auto-trigger: unusually short cycles vs median RR ---
+    if rr_int.size > 1:
+        short_idxs = np.where(rr_int < (0.35 * avg_rr))[0]
+        for si in short_idxs:
+            out["auto_trigger"].append(int(peaks[si+1]))
+
+    # deduplicate and sort lists
+    out["ineffective_efforts"] = sorted(list(set(out["ineffective_efforts"])))
+    out["flow_starvation"] = sorted(list(set(out["flow_starvation"])))
+    out["auto_trigger"] = sorted(list(set(out["auto_trigger"])))
+    out["double_trigger"] = sorted(list(set(out["double_trigger"])))
+
+    return out
 
 # =========================
 # UI / INTERFAZ PRINCIPAL
@@ -285,11 +393,12 @@ def main():
 
     fs = int(st.sidebar.number_input("Frecuencia muestreo estimada (Hz)", min_value=10, value=50, step=1))
     smooth_win = st.sidebar.slider("Suavizado (Window)", 3, 51, 11, step=2)
-    peak_prom = st.sidebar.slider("Sensibilidad de Trigger", 0.01, 1.0, 0.2)
+    peak_prom = float(st.sidebar.slider("Sensibilidad de Trigger", 0.01, 1.0, 0.2))
     
     with st.sidebar.expander("Opciones Avanzadas"):
-        smooth_poly = st.slider("Grado Polinomio (SG)", 1, 5, 3)
-        ie_prom_scale = st.slider("Sensibilidad IE", 0.01, 0.2, 0.06)
+        smooth_poly = int(st.slider("Grado Polinomio (SG)", 1, 5, 3))
+        ie_prom_scale = float(st.slider("Sensibilidad IE (scale)", 0.01, 0.5, 0.06))
+        enable_advanced_algo = st.checkbox("Usar algoritmo avanzado (DT/IE/FS/AT)", value=True)
 
     modo = st.sidebar.radio("Tipo de curva detectada", ["Presión (Paw)", "Flujo (Flow)"])
 
@@ -323,11 +432,24 @@ def main():
         min_dist = int(0.25 * fs)  # 250ms periodo refractario
         peaks, props = find_peaks(norm_sig, prominence=prominence_val, distance=min_dist)
 
-        # Correr detectores
-        ie_events = detect_ineffective_efforts(norm_sig, peaks.tolist(), fs)
-        at_events = detect_auto_trigger(norm_sig, peaks.tolist(), fs)
+        # Run both legacy detectors and advanced algorithm (if enabled)
+        # Legacy detectors (kept as fallback / complementary)
+        ie_events_legacy = detect_ineffective_efforts(norm_sig, peaks.tolist(), fs)
+        at_events_legacy = detect_auto_trigger(norm_sig, peaks.tolist(), fs)
         td_events = detect_trigger_delay(norm_sig, peaks.tolist(), fs, delay_threshold_sec=0.15)
         cycling_issues = detect_cycling_issues(norm_sig, peaks.tolist(), fs)
+
+        # Advanced integrated detection
+        adv = analyze_asynchronies(norm_sig, fs, prom_main=prominence_val, ie_scale=ie_prom_scale) if enable_advanced_algo else {
+            "double_trigger": [], "ineffective_efforts": [], "flow_starvation": [], "auto_trigger": [], "peaks": []
+        }
+
+        # Combine results: union of legacy and advanced for IE and AT
+        ie_events = sorted(list(set(ie_events_legacy + adv.get("ineffective_efforts", []))))
+        at_events = sorted(list(set(at_events_legacy + adv.get("auto_trigger", []))))
+        dt_events = adv.get("double_trigger", [])  # list of tuples (p1,p2)
+        fs_events = adv.get("flow_starvation", [])
+        # td_events and cycling_issues remain from legacy detector
 
     # --- RESULTADOS ---
     st.subheader("2. Resultados del Análisis")
@@ -337,7 +459,7 @@ def main():
     col1.metric("Ciclos Totales", len(peaks))
     col2.metric("Esfuerzos Inefectivos", len(ie_events), delta_color="inverse")
     col3.metric("Auto-trigger", len(at_events), delta_color="inverse")
-    col4.metric("Errores de Ciclado", len(cycling_issues), delta_color="inverse")
+    col4.metric("Double Trigger (DT)", len(dt_events), delta_color="inverse")
 
     # Plot with annotations
     st.markdown("##### Visualización de Eventos")
@@ -350,34 +472,52 @@ def main():
     ax.axis('off') # Sin ejes para limpieza
 
     # main peaks
-    if peaks.size > 0:
+    if len(peaks) > 0:
         ax.scatter(peaks, norm_sig[peaks], c='white', s=30, zorder=5, alpha=0.7)
 
-    # Annotations
+    # Annotations: IE
     if len(ie_events) > 0:
         ie_idx = np.array(ie_events, dtype=int)
         ie_idx = ie_idx[(ie_idx >= 0) & (ie_idx < len(norm_sig))]
         if ie_idx.size > 0:
             ax.scatter(ie_idx, norm_sig[ie_idx], marker='x', color='orange', s=100, label='Esf. Inefectivo', linewidths=3)
 
+    # Annotations: Auto-trigger
     if len(at_events) > 0:
         at_idx = np.array(at_events, dtype=int)
         at_idx = at_idx[(at_idx >= 0) & (at_idx < len(norm_sig))]
         if at_idx.size > 0:
             ax.scatter(at_idx, norm_sig[at_idx], marker='D', color='magenta', s=80, label='Auto-trigger')
 
+    # Annotations: Flow Starvation (FS)
+    if len(fs_events) > 0:
+        fs_idx = np.array(fs_events, dtype=int)
+        fs_idx = fs_idx[(fs_idx >= 0) & (fs_idx < len(norm_sig))]
+        if fs_idx.size > 0:
+            ax.scatter(fs_idx, norm_sig[fs_idx], marker='v', color='magenta', s=100, label='Flow Starvation')
+
+    # Annotations: Double Trigger (DT) - draw connecting lines
+    if len(dt_events) > 0:
+        for (p1, p2) in dt_events:
+            if 0 <= p1 < len(norm_sig) and 0 <= p2 < len(norm_sig):
+                ax.plot([p1, p2], [norm_sig[p1], norm_sig[p2]], color='red', linewidth=3, linestyle=':')
+                ax.text(p2, norm_sig[p2] + 0.03, "DT", color='red', fontweight='bold')
+
+    # legacy trigger delay annotations
     if len(td_events) > 0:
         for ev in td_events:
             p = int(ev["peak"])
             onset = int(ev["onset"])
-            ax.plot([onset, p], [norm_sig[onset], norm_sig[p]], color='red', lw=2, linestyle='--')
-            ax.text(p, norm_sig[p] + 0.05, f"Retraso {ev['delay_s']:.2f}s", color='red', fontsize=9, backgroundcolor='black')
+            if 0 <= onset < len(norm_sig) and 0 <= p < len(norm_sig):
+                ax.plot([onset, p], [norm_sig[onset], norm_sig[p]], color='red', lw=2, linestyle='--')
+                ax.text(p, norm_sig[p] + 0.05, f"Retraso {ev['delay_s']:.2f}s", color='red', fontsize=9, backgroundcolor='black')
 
     for ci in cycling_issues:
         p = int(ci["peak"])
         tag = 'PREMATURO' if ci["type"] == 'Prematuro' else 'TARDIO'
         color = 'orange' if tag == 'PREMATURO' else 'purple'
-        ax.text(p, norm_sig[p] - 0.15, tag, color=color, fontsize=8, fontweight='bold', backgroundcolor='black')
+        if 0 <= p < len(norm_sig):
+            ax.text(p, norm_sig[p] - 0.15, tag, color=color, fontsize=8, fontweight='bold', backgroundcolor='black')
 
     ax.legend(loc='upper right', facecolor='#111111', framealpha=0.8, labelcolor='white')
     st.pyplot(fig)
@@ -389,7 +529,9 @@ def main():
     col_interp1, col_interp2 = st.columns([2, 1])
     
     with col_interp1:
-        if len(td_events) > 0:
+        if len(dt_events) > 0:
+            st.error(f"🚨 **Double Trigger detectado:** {len(dt_events)} eventos. Revise Ti mecánico vs Ti neural.")
+        elif len(td_events) > 0:
             st.error(f"⚠️ **Trigger Delay Detectado:** En {len(td_events)} ciclos el paciente inicia el esfuerzo mucho antes que el ventilador. \n\n*Sugerencia:* Revisa la sensibilidad (Trigger) o busca PEEP intrínseca.")
         elif len(at_events) > 0:
             st.warning("⚠️ **Posible Auto-trigger:** Se detectan ciclos frecuentes de baja amplitud sin esfuerzo aparente. \n\n*Sugerencia:* Verifica fugas en el circuito o presencia de oscilaciones cardíacas.")
