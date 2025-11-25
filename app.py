@@ -280,6 +280,44 @@ def main():
             # ==========================================
             # BLOQUE FS CORREGIDO
             # ==========================================
-            if len(starvation_events) > 0:
-                starvation_events = [
-                    i for i in starvation_events if 0 <= i < l_
+            # FS (Flow Starvation)
+if len(starvation_events) > 0:
+
+    # Asegurar índices válidos
+    starvation_events = [
+        i for i in starvation_events 
+        if 0 <= i < len(processed_sig)
+    ]
+
+    y_fs = processed_sig[starvation_events]
+
+    # Dibujar en el gráfico
+    ax.scatter(
+        starvation_events,
+        y_fs,
+        color='magenta',
+        marker='D',
+        s=90,
+        linewidth=2
+    )
+
+    results = {
+        "detected": True,
+        "event_count": len(starvation_events),
+        "events": starvation_events,
+        "peaks": major_peaks,
+        "signal_processed": processed_sig,
+        "message": "Eventos de hambre de flujo detectados"
+    }
+
+else:
+    results = {
+        "detected": False,
+        "event_count": 0,
+        "events": [],
+        "peaks": major_peaks,
+        "signal_processed": processed_sig,
+        "message": "Sin eventos de hambre de flujo detectados"
+    }
+
+st.pyplot(fig)
