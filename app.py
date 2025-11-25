@@ -103,6 +103,42 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     results["detected"] = len(dt_events) > 0
 
     return results
+    def analyze_ineffective_efforts(signal_data, major_peaks, sample_rate=50):
+    """
+    Detecta esfuerzos inefectivos buscando pequeñas perturbaciones positivas
+    durante la fase espiratoria (entre dos picos principales).
+    """
+    ie_events =
+    
+    # Si tenemos menos de 2 respiraciones, no podemos analizar intervalos
+    if len(major_peaks) < 2:
+        return ie_events
+
+    # Recorremos el espacio ENTRE cada par de picos principales
+    for i in range(len(major_peaks) - 1):
+        start_idx = major_peaks[i]
+        end_idx = major_peaks[i+1]
+        
+        # Definimos la "Zona de Exhalación" (aprox. el 50-90% del intervalo)
+        # para evitar confundirnos con el inicio/final de la respiración principal
+        interval_len = end_idx - start_idx
+        search_start = start_idx + int(interval_len * 0.2) # Saltamos el descenso inicial
+        search_end = end_idx - int(interval_len * 0.1)     # Saltamos el ascenso final
+        
+        segment = signal_data[search_start:search_end]
+        
+        if len(segment) == 0: continue
+
+        # Buscamos "micro-picos" en este segmento de exhalación
+        # Usamos una prominencia mucho menor porque estos esfuerzos son débiles
+        micro_peaks, _ = find_peaks(segment, prominence=0.05, width=5)
+        
+        if len(micro_peaks) > 0:
+            # Si encontramos algo, ajustamos el índice para que coincida con la señal original
+            absolute_idx = search_start + micro_peaks
+            ie_events.append(absolute_idx)
+            
+    return ie_events
 
 # ==========================================
 # BLOQUE 3: Interfaz de Usuario
@@ -147,44 +183,64 @@ def main():
 
                 signal_np = np.array(signal_extracted)
 
-            # Análisis
+      # --- Análisis Fase 2 (Doble Disparo) ---
             analysis = analyze_double_trigger(signal_np, sample_rate=fs_estimada, sensitivity=sensibilidad)
+            
+            # --- Análisis Fase 3 (Esfuerzos Inefectivos) ---
+            # Usamos los picos detectados en la fase 2 para buscar entre ellos
+            ie_peaks = analyze_ineffective_efforts(analysis["signal_processed"], analysis["peaks"], sample_rate=fs_estimada)
 
-            # --- Resultados ---
+            # --- Visualización de Resultados ---
             st.divider()
-            st.subheader("Resultados del Análisis")
+            st.subheader("Resultados del Análisis Multimodal")
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Ciclos Detectados", len(analysis["peaks"]))
-            col2.metric("Eventos Doble Disparo", analysis["event_count"],
-                        delta="-Peligro" if analysis["detected"] else "Normal",
+            # Métricas (Actualizadas con Fase 3)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Ciclos Ventilatorios", len(analysis["peaks"]))
+            
+            m2.metric("Doble Disparo", analysis["event_count"], 
+                        delta="-Alerta" if analysis["detected"] else "Normal",
+                        delta_color="inverse")
+            
+            m3.metric("Esfuerzos Inefectivos", len(ie_peaks),
+                        delta="-Fatiga Muscular" if len(ie_peaks) > 0 else "Normal",
                         delta_color="inverse")
 
-            # --- Gráfico ---
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(analysis["signal_processed"], label='Forma de Onda', linewidth=1.5)
-
+            # --- Gráfico Combinado ---
+            fig, ax = plt.subplots(figsize=(10, 5))
+            
+            # 1. Señal Base
+            ax.plot(analysis["signal_processed"], label='Presión/Flujo', color='steelblue', linewidth=1.5)
+            
+            # 2. Picos Principales (Respiraciones)
             peaks_x = analysis["peaks"]
             peaks_y = analysis["signal_processed"][peaks_x]
-            ax.scatter(peaks_x, peaks_y, s=50, label='Inspiración')
+            ax.scatter(peaks_x, peaks_y, color='lime', s=60, label='Disparo Ventilador', zorder=5)
 
+            # 3. Doble Disparo (Líneas Rojas)
             if analysis["detected"]:
                 for event in analysis["events"]:
                     p1, p2 = event["peak1"], event["peak2"]
-                    ax.plot([p1, p2], [analysis["signal_processed"][p1], analysis["signal_processed"][p2]],
+                    ax.plot([p1, p2], [analysis["signal_processed"][p1], analysis["signal_processed"][p2]], 
                             color='red', linewidth=3, linestyle='--')
+                    ax.text(p2, analysis["signal_processed"][p2] + 0.05, "DT", color='red', fontsize=10, fontweight='bold')
 
-            ax.set_title("Análisis Morfológico de Ventilación")
+            # 4. Esfuerzos Inefectivos (Marcadores Naranjas)
+            if len(ie_peaks) > 0:
+                ie_y = analysis["signal_processed"][ie_peaks]
+                ax.scatter(ie_peaks, ie_y, color='orange', marker='x', s=100, label='Esfuerzo Inefectivo', zorder=6)
+                for idx in ie_peaks:
+                     ax.text(idx, analysis["signal_processed"][idx] + 0.05, "IE", color='orange', fontsize=9)
+
+            ax.set_title("Análisis de Asincronías: DT + IE")
             ax.set_xlabel("Tiempo (muestras)")
-            ax.set_ylabel("Amplitud")
-            ax.legend()
+            ax.legend(loc='upper right')
             ax.grid(True, alpha=0.3)
-
             st.pyplot(fig)
 
             if analysis["detected"]:
                 st.warning("""
-                ⚠️ **Alerta:** Se han detectado eventos compatibles con Doble Disparo.
+                ⚠️ **Alerta:** Se han detectado eventos compatibles con Doble Disparo. Considerar cambios. En VC-CMV evaluar reverse trigger, timepo inspiratorio insuficiente. Considerar cambiar de modo  PC-CMV
                 """)
             else:
                 st.success("Análisis completado: No se detectaron asincronías mayores.")
