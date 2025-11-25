@@ -174,7 +174,7 @@ def main():
                 # Asumimos que la onda es más brillante o más oscura. 
                 # Aquí tomamos la columna con el píxel más brillante como "y".
                 # Este es un método heurístico rápido.
-                signal_extracted = # Lista vacia corregida
+                signal_extracted = list()# Lista vacia corregida
                 height, width = gray.shape
                 
                 # Recorremos el 80% central del ancho para evitar bordes
