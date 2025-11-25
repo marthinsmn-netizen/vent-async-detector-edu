@@ -98,7 +98,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     dt_threshold_seconds = 1.0 
     dt_threshold_samples = dt_threshold_seconds * sample_rate
     
-    dt_events = # Lista vacia corregida
+    dt_events = list()# Lista vacia corregida
     
     if len(peaks) >= 2:
         for i in range(len(peaks) - 1):
