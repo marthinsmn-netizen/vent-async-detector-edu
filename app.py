@@ -8,42 +8,43 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, savgol_filter
 
-# Configuración crítica para entornos sin display (Streamlit Cloud, Docker)
-# Esto evita errores de Tcl/Tk o X11 al generar gráficos.
+# Configuración crítica para entornos sin display
 import matplotlib
-matplotlib.use('Agg') 
+matplotlib.use('Agg')
 
-# Configuración de página (Opcional, pero recomendado)
+# Configuración de página
 st.set_page_config(
     page_title="Detector de Asincronías Ventilatorias",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 # ==========================================
-# BLOQUE 2: Funciones Core de Procesamiento (Fase 2)
+# BLOQUE 2: Funciones Core de Procesamiento
 # ==========================================
 def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     """
     Detecta eventos de Doble Disparo en una señal unidimensional de ventilación.
     """
-    # CORRECCIÓN: Usamos listas vacías y un solo '='
+
+    # Diccionario de resultados correctamente indentado y con listas vacías
     results = {
         "detected": False,
         "event_count": 0,
-        "events":,       # <--- Corregido: Corchetes vacíos
-        "peaks":,        # <--- Corregido: Corchetes vacíos
+        "events": [],
+        "peaks": [],
         "signal_processed": None,
         "message": ""
     }
 
-    # --- Paso 1: Preprocesamiento y Suavizado ---
+    # --- Paso 1: Preprocesamiento y suavizado ---
     try:
-        window = 11 
-        poly = 3     
+        window = 11
+        poly = 3
         smoothed = savgol_filter(signal_data, window_length=window, polyorder=poly)
-    except Exception as e:
+    except Exception:
         smoothed = signal_data
-    
+
     results["signal_processed"] = smoothed
 
     # --- Paso 2: Normalización ---
@@ -51,10 +52,10 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     if sig_max - sig_min == 0:
         results["message"] = "Señal plana o sin variación detectada."
         return results
-        
+
     norm_sig = (smoothed - sig_min) / (sig_max - sig_min)
 
-    # --- Paso 3: Configuración de Parámetros de Find_Peaks ---
+    # --- Paso 3: Configuración de parámetros ---
     prominence_val = max(0.1, 0.6 - (sensitivity * 0.5))
     min_dist_samples = int(0.2 * sample_rate)
     min_width_samples = int(0.05 * sample_rate)
@@ -67,156 +68,132 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     )
     results["peaks"] = peaks
 
-    # --- Paso 4: Lógica de Detección de Doble Disparo ---
-    dt_threshold_seconds = 1.0 
+    # --- Paso 4: Detección de doble disparo ---
+    dt_threshold_seconds = 1.0
     dt_threshold_samples = dt_threshold_seconds * sample_rate
-    
-    dt_events = # <--- Corregido: Lista vacía explícita
-    
+
+    dt_events = []  # lista vacía corregida
+
     if len(peaks) >= 2:
         for i in range(len(peaks) - 1):
             idx_current = peaks[i]
-            idx_next = peaks[i+1]
-            
+            idx_next = peaks[i + 1]
+
             interval_samples = idx_next - idx_current
             interval_seconds = interval_samples / sample_rate
-            
-            # Criterio 1: Proximidad Temporal
+
+            # Criterio 1: proximidad temporal
             if interval_samples < dt_threshold_samples:
-                
-                # Criterio 2: Análisis del Valle (Breath Stacking)
+
+                # Criterio 2: profundidad del valle
                 segment = norm_sig[idx_current:idx_next]
                 if len(segment) > 0:
                     valley_min = np.min(segment)
-                    stacking_severity = valley_min 
-                    
+
                     event_data = {
                         "peak1": idx_current,
                         "peak2": idx_next,
                         "interval_sec": interval_seconds,
-                        "stacking_idx": stacking_severity
+                        "stacking_idx": float(valley_min)
                     }
                     dt_events.append(event_data)
 
     results["events"] = dt_events
     results["event_count"] = len(dt_events)
     results["detected"] = len(dt_events) > 0
-    
+
     return results
-    # ==========================================
-# BLOQUE 3: Interfaz de Usuario y Flujo Principal
+
+# ==========================================
+# BLOQUE 3: Interfaz de Usuario
 # ==========================================
 
 def main():
     st.title("🩺 Detección de Asincronías: Fase 2")
     st.markdown("""
     Este módulo analiza formas de onda capturadas del ventilador para detectar **Doble Disparo**.
-    Asegúrese de capturar una imagen clara donde la curva (Flujo o Presión) sea visible.
+    Asegúrese de capturar una imagen clara donde la curva sea visible.
     """)
-    
-    # Sidebar de Configuración
+
+    # Sidebar
     st.sidebar.header("Configuración del Algoritmo")
-    sensibilidad = st.sidebar.slider("Sensibilidad de Detección", 0.0, 1.0, 0.5, help="Aumente para detectar picos más sutiles.")
+    sensibilidad = st.sidebar.slider("Sensibilidad de Detección", 0.0, 1.0, 0.5)
     fs_estimada = st.sidebar.number_input("Frecuencia de Muestreo Estimada (px/s)", min_value=10, value=50, step=10)
 
-    # Entrada de Cámara con Manejo de Errores
+    # Captura de cámara
     img_buffer = st.camera_input("Capturar Pantalla del Ventilador")
 
     if img_buffer is not None:
-        # 1. Leer la imagen desde el buffer
         bytes_data = img_buffer.getvalue()
         img_array = np.frombuffer(bytes_data, np.uint8)
         original_img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
         if original_img is not None:
             st.image(original_img, caption="Imagen Capturada", channels="BGR", use_column_width=True)
-            
+
             with st.spinner("Procesando imagen y extrayendo señal..."):
-                # --- Extracción de Señal (Simulada/Simplificada para el ejemplo) ---
-                # NOTA: En producción, aquí iría el pipeline completo de HSV -> Skeletonize.
-                # Para este ejemplo funcional, convertimos la imagen a escala de grises y 
-                # extraemos el perfil de intensidad de una línea central o usamos luminancia.
-                
-                # Método robusto simple: Convertir a grises, invertir (onda clara fondo oscuro)
                 gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-                
-                # Asumimos que la onda es más brillante o más oscura. 
-                # Aquí tomamos la columna con el píxel más brillante como "y".
-                # Este es un método heurístico rápido.
-                signal_extracted = list()# Lista vacia corregida
+                signal_extracted = []
+
                 height, width = gray.shape
-                
-                # Recorremos el 80% central del ancho para evitar bordes
                 start_col = int(width * 0.1)
                 end_col = int(width * 0.9)
-                
+
                 for col in range(start_col, end_col):
                     column_data = gray[:, col]
-                    # Encontrar la posición del valor máximo (brillo) o mínimo (tinta)
-                    # Asumimos onda clara sobre fondo oscuro:
-                    max_idx = np.argmax(column_data) 
-                    # Invertimos coordenada Y para gráfico cartesiano (0 abajo)
-                    y_val = height - max_idx 
+                    max_idx = np.argmax(column_data)
+                    y_val = height - max_idx
                     signal_extracted.append(y_val)
-                
+
                 signal_np = np.array(signal_extracted)
 
-            # --- Ejecución del Análisis Fase 2 ---
+            # Análisis
             analysis = analyze_double_trigger(signal_np, sample_rate=fs_estimada, sensitivity=sensibilidad)
 
-            # --- Visualización de Resultados ---
+            # --- Resultados ---
             st.divider()
             st.subheader("Resultados del Análisis")
 
-            # Métricas
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Ciclos Detectados", len(analysis["peaks"]))
-            col2.metric("Eventos Doble Disparo", analysis["event_count"], 
+            col2.metric("Eventos Doble Disparo", analysis["event_count"],
                         delta="-Peligro" if analysis["detected"] else "Normal",
                         delta_color="inverse")
-            
-            # Gráfico Interactivo
+
+            # --- Gráfico ---
             fig, ax = plt.subplots(figsize=(10, 4))
-            # Plot Señal Suavizada
-            ax.plot(analysis["signal_processed"], label='Forma de Onda', color='steelblue', linewidth=1.5)
-            
-            # Plot Picos
+            ax.plot(analysis["signal_processed"], label='Forma de Onda', linewidth=1.5)
+
             peaks_x = analysis["peaks"]
             peaks_y = analysis["signal_processed"][peaks_x]
-            ax.scatter(peaks_x, peaks_y, color='lime', s=50, label='Inspiración', zorder=5)
-            
-            # Plot Eventos DT
+            ax.scatter(peaks_x, peaks_y, s=50, label='Inspiración')
+
             if analysis["detected"]:
                 for event in analysis["events"]:
-                    p1 = event["peak1"]
-                    p2 = event["peak2"]
-                    y_h = analysis["signal_processed"][p1]
-                    # Dibujar línea roja conectando el doble disparo
-                    ax.plot([p1, p2], [y_h, analysis["signal_processed"][p2]], color='red', linewidth=3, linestyle='--')
-                    ax.annotate('DT', xy=(p2, analysis["signal_processed"][p2]), xytext=(p2, y_h*1.2),
-                                arrowprops=dict(facecolor='red', shrink=0.05))
-            
+                    p1, p2 = event["peak1"], event["peak2"]
+                    ax.plot([p1, p2], [analysis["signal_processed"][p1], analysis["signal_processed"][p2]],
+                            color='red', linewidth=3, linestyle='--')
+
             ax.set_title("Análisis Morfológico de Ventilación")
             ax.set_xlabel("Tiempo (muestras)")
-            ax.set_ylabel("Amplitud (u.a.)")
+            ax.set_ylabel("Amplitud")
             ax.legend()
             ax.grid(True, alpha=0.3)
-            
+
             st.pyplot(fig)
-            
+
             if analysis["detected"]:
                 st.warning("""
-                ⚠️ **Alerta de Asincronía:** Se han detectado eventos compatibles con Doble Disparo. 
-                Verifique si el Tiempo Inspiratorio del ventilador es menor al Tiempo Neural del paciente.
-                Considere evaluar el nivel de sedación o ajustar el ciclado.
+                ⚠️ **Alerta:** Se han detectado eventos compatibles con Doble Disparo.
                 """)
             else:
-                st.success("Análisis completado: No se detectaron asincronías mayores en este segmento.")
+                st.success("Análisis completado: No se detectaron asincronías mayores.")
 
         else:
             st.error("Error: No se pudo decodificar la imagen.")
     else:
         st.info("Esperando captura de imagen...")
+
 
 if __name__ == "__main__":
     main()
