@@ -45,9 +45,9 @@ def analyze_flow_starvation(signal, peaks, sample_rate):
         if segment.size < 5:
             continue
 
-        # ------ CORRECCIÓN AQUÍ ------
+        # Línea ideal y concavidad
         x_seg = np.arange(len(segment))
-        y_start = float(segment[0])           # <-- CORREGIDO
+        y_start = float(segment[0])
         y_end = float(segment[-1])
 
         if len(segment) > 1:
@@ -59,12 +59,11 @@ def analyze_flow_starvation(signal, peaks, sample_rate):
         diff = ideal_line - segment
         max_concavity = float(np.max(diff))
 
-        # Prevención de división por cero
         peak_height = max(1e-6, y_end - float(np.min(signal)))
-
         normalized_concavity = max_concavity / peak_height
+
         if normalized_concavity > 0.15:
-            mark_idx = start_insp + int(len(segment)/2)
+            mark_idx = start_insp + int(len(segment) / 2)
             starvation_events.append(mark_idx)
 
     return sorted(list(set(starvation_events)))
@@ -89,7 +88,7 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
         if window >= signal.size:
             window = max(3, signal.size - (2 if signal.size % 2 == 0 else 1))
         poly = 3
-        smoothed = savgol_filter(signal, window_length=window, polyorder=min(poly, window-1))
+        smoothed = savgol_filter(signal, window_length=window, polyorder=min(poly, window - 1))
     except:
         smoothed = signal.copy()
 
@@ -114,11 +113,11 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
 
     if peaks.size >= 2:
         for i in range(peaks.size - 1):
-            t_diff = float(peaks[i+1] - peaks[i]) / float(sample_rate)
+            t_diff = float(peaks[i + 1] - peaks[i]) / float(sample_rate)
             if 0 < t_diff < dt_thresh_sec:
                 dt_events.append({
                     "peak1": int(peaks[i]),
-                    "peak2": int(peaks[i+1]),
+                    "peak2": int(peaks[i + 1]),
                     "time_diff": t_diff
                 })
 
@@ -137,7 +136,7 @@ def analyze_ineffective_efforts(signal_data, major_peaks, sample_rate=50):
 
     for i in range(major_peaks_arr.size - 1):
         start = int(major_peaks_arr[i])
-        end = int(major_peaks_arr[i+1])
+        end = int(major_peaks_arr[i + 1])
 
         interval = end - start
         if interval < 5:
@@ -209,7 +208,6 @@ def main():
             processed_sig = analysis["signal_processed"]
             major_peaks = analysis["peaks"]
 
-            # --- Corrección: evitar índices fuera de rango ---
             major_peaks = [p for p in major_peaks if 0 <= p < len(processed_sig)]
 
             ie_events = []
@@ -250,22 +248,38 @@ def main():
             for evt in analysis["events"]:
                 p1, p2 = evt["peak1"], evt["peak2"]
                 if p1 < len(processed_sig) and p2 < len(processed_sig):
-                    ax.plot([p1, p2], [processed_sig[p1], processed_sig[p2]],
-                            color='red', linewidth=3, linestyle='--')
-                    ax.text(p2, processed_sig[p2] + 10, "DT",
-                            color='red', fontsize=12, fontweight='bold')
+                    ax.plot(
+                        [p1, p2],
+                        [processed_sig[p1], processed_sig[p2]],
+                        color='red',
+                        linewidth=3,
+                        linestyle='--'
+                    )
+                    ax.text(
+                        p2,
+                        processed_sig[p2] + 10,
+                        "DT",
+                        color='red',
+                        fontsize=12,
+                        fontweight='bold'
+                    )
 
             # IE
             if len(ie_events) > 0:
                 ie_events = [i for i in ie_events if 0 <= i < len(processed_sig)]
                 y_ie = processed_sig[ie_events]
-                ax.scatter(ie_events, y_ie, color='orange', marker='x', s=100, linewidth=3)
+                ax.scatter(
+                    ie_events,
+                    y_ie,
+                    color='orange',
+                    marker='x',
+                    s=100,
+                    linewidth=3
+                )
 
-            # FS
-            if len(starva) > 0:
-    results["detected"] = True
-    results["event_count"] = len(starva)
-    results["events"] = starva
-
-
-
+            # ==========================================
+            # BLOQUE FS CORREGIDO
+            # ==========================================
+            if len(starvation_events) > 0:
+                starvation_events = [
+                    i for i in starvation_events if 0 <= i < l_
