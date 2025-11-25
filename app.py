@@ -31,8 +31,8 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     results = {
         "detected": False,
         "event_count": 0,
-        "events":, 
-        "peaks":,   
+        "events":, list ()
+        "peaks":, list ()
         "signal_processed": None,
         "message": ""
     }
