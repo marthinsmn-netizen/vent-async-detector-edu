@@ -1,303 +1,295 @@
-# ==========================================
-# BLOQUE 1: Importaciones y Configuración
-# ==========================================
-import streamlit as st
-import cv2
+"""
+Phase 5: Precision Algorithms - Ventilator Asynchrony Detection System
+Filename: app.py
+
+Descripción General:
+    Este módulo implementa el motor de análisis para la 'Fase 5: Algoritmos de Precisión'.
+    Su objetivo es la detección y cuantificación morfológica de asincronías ventilatorias,
+    superando la detección binaria tradicional.
+    
+    Mejoras Clave Implementadas:
+    1. 'Área de Déficit' (Flow Starvation): Calcula la integral de la diferencia entre
+       la curva de flujo/presión ideal y la real para cuantificar el "Hambre de Aire".
+    2. 'Umbral de Valle' (Double Trigger): Analiza la profundidad del flujo entre dos
+       picos consecutivos para diferenciar entre taquipnea y apilamiento de respiraciones (breath stacking).
+
+    Fundamentos Técnicos y Científicos:
+    - Integración Numérica: Utiliza la Regla del Trapecio (numpy.trapz) para el cálculo
+      de áreas bajo curvas discretas.
+    - Procesamiento de Señales: Detección de picos y valles mediante Scipy, aplicando
+      lógica de umbrales dinámicos inspirada en sistemas LIDAR y análisis de ondas.
+    - Fisiopatología: Definiciones basadas en la cinética de la inanición de flujo [7]
+      y el disparo doble.
+
+Autor: Experto en Procesamiento de Señales Biomédicas
+Fase: 5 (Algoritmos de Precisión)
+"""
+
+import logging
 import numpy as np
-import matplotlib.pyplot as plt
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import find_peaks
+from flask import Flask, request, jsonify
 
-# Configuración para entornos sin display (Streamlit Cloud)
-import matplotlib
-matplotlib.use('Agg')
+# Configuración del sistema de logging para trazabilidad clínica y depuración
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-st.set_page_config(
-    page_title="Ventilador Lab AI",
-    page_icon="🫁",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+app = Flask(__name__)
 
-# ==========================================
-# BLOQUE 2: Funciones Core de Procesamiento
-# ==========================================
+class AlgorithmConfig:
+    """
+    Clase de Configuración para los Algoritmos de la Fase 5.
+    
+    Estos parámetros calibran la sensibilidad de los algoritmos de precisión.
+    En una implementación futura, estos valores podrían ser dinámicos basados en el
+    Peso Corporal Ideal (IBW) del paciente o la compliance pulmonar.
+    """
+    # Frecuencia de muestreo típica de ventiladores modernos (50Hz o 100Hz) 
+    SAMPLING_RATE_HZ = 50
+    
+    # --- Parámetros para Área de Déficit (Flow Starvation) ---
+    # Un área de déficit > este valor indica un trabajo respiratorio significativo.
+    # Unidad: (L/min * seg) -> Proxi de volumen perdido o esfuerzo no asistido.
+    # Se establece un umbral base conservador para evitar falsos positivos por ruido.
+    DEFICIT_AREA_THRESHOLD = 5.0 
+    
+    # --- Parámetros para Umbral de Valle (Double Trigger) ---
+    # Ventana de tiempo máxima entre picos para considerar un posible apilamiento.
+    #  sugiere que el DT ocurre en un intervalo corto (<50% tiempo insp).
+    DT_TIME_WINDOW_SEC = 1.5
+    
+    # RATIO DE RETENCIÓN DE VALLE (The Valley Threshold)
+    # Si el flujo en el valle (entre dos picos) se mantiene por ENCIMA de este porcentaje
+    # del primer pico, indica que la exhalación fue incompleta o inexistente.
+    # 0.10 significa que el flujo solo bajó al 10% del pico antes de volver a subir.
+    VALLEY_RETENTION_RATIO = 0.10  # 10%
+    
+    # Flujo mínimo absoluto para considerar un evento como inspiración válida (L/min)
+    MIN_FLOW_TRIGGER = 2.0
 
-def analyze_clinical_metrics(peaks, signal_len, sample_rate):
-    if len(peaks) < 2:
-        return {"rr": 0, "cycle_time": 0}
+class WaveformProcessor:
+    """
+    Motor central de procesamiento de señales.
+    Encapsula la lógica matemática y física para la Fase 5.
+    """
 
-    total_time_sec = float(signal_len) / float(sample_rate)
-    rr = (len(peaks) / total_time_sec) * 60.0 if total_time_sec > 0 else 0.0
-    return {"rr": int(round(rr)), "duration": total_time_sec}
+    @staticmethod
+    def smooth_signal(signal_array, window_size=3):
+        """
+        Aplica un suavizado de media móvil para reducir el ruido del sensor.
+        Crucial para evitar que fluctuaciones menores sean detectadas como picos o valles falsos.
+        """
+        window = np.ones(window_size) / window_size
+        # 'same' devuelve un array del mismo tamaño que la entrada
+        return np.convolve(signal_array, window, mode='same')
 
-def analyze_flow_starvation(signal, peaks, sample_rate):
-    starvation_events = list()
-    signal = np.asarray(signal, dtype=float)
-    if signal.size == 0 or len(peaks) < 1:
-        return starvation_events
+    @staticmethod
+    def calculate_area_of_deficit(time_vector, flow_vector, breath_type='VC'):
+        """
+        Calcula el 'Área de Déficit' representando la Inanición de Flujo (Flow Starvation).
+        
+        Teoría:
+            La inanición de flujo se manifiesta como una concavidad ('scooping') en la onda.
+            Matemáticamente: Déficit = Integral(Curva_Referencia - Curva_Real).
+            
+        Método:
+            Utiliza integración trapezoidal compuesta (numpy.trapz).
+            Esta aproximación es robusta para datos muestreados equidistantemente.
+            
+        Argumentos:
+            time_vector (np.array): Vector de tiempo.
+            flow_vector (np.array): Vector de flujo inspiratorio.
+            breath_type (str): 'VC' (Volumen Control - Referencia Cuadrada) o 
+                               'PC' (Presión Control - Referencia Desacelerante).
+                               
+        Retorna:
+            float: El área de déficit calculada (magnitud del hambre de aire).
+            float: El área total de referencia (para cálculo de porcentaje relativo).
+        """
+        # 1. Identificación de Puntos Críticos
+        # Encontramos el flujo máximo para escalar la curva de referencia.
+        max_flow = np.max(flow_vector)
+        max_idx = np.argmax(flow_vector)
+        
+        # 2. Generación de la Curva de Referencia (El "Ideal")
+        reference_curve = np.zeros_like(flow_vector)
+        
+        if breath_type == 'VC':
+            # Volumen Control: El flujo ideal es una Onda Cuadrada (flujo constante).
+            # Referencia = Flujo Máximo mantenido hasta el final de la inspiración.
+            reference_curve[:] = max_flow
+            
+        elif breath_type == 'PC':
+            # Presión Control: El flujo ideal es Desacelerante (Exponencial o Lineal).
+            # Aproximamos una referencia lineal desde el Pico hasta el Flujo Final.
+            # Cualquier caída por debajo de esta línea recta indica una concavidad anómala.
+            
+            end_flow = flow_vector[-1]
+            # Calculamos la pendiente de desaceleración ideal
+            slope = (end_flow - max_flow) / (len(flow_vector) - max_idx) if len(flow_vector) > max_idx else 0
+            
+            # Antes del pico, asumimos que la subida es correcta (sin déficit inicial)
+            reference_curve[:max_idx] = flow_vector[:max_idx]
+            
+            # Después del pico, proyectamos la línea de desaceleración ideal
+            for i in range(max_idx, len(flow_vector)):
+                reference_curve[i] = max_flow + slope * (i - max_idx)
 
-    for p_idx in peaks:
-        p_idx = int(p_idx)
-        lookback = int(0.5 * sample_rate)
-        start_insp = max(0, p_idx - lookback)
-        segment = signal[start_insp:p_idx]
+        # 3. Cálculo del Vector de Déficit
+        # Solo nos interesa donde Referencia > Real (Concavidad/Hambre de aire).
+        # Si Real > Referencia (Overshoot), el déficit es 0 para ese punto.
+        deficit_vector = reference_curve - flow_vector
+        deficit_vector[deficit_vector < 0] = 0  # Clamp de valores negativos
+        
+        # 4. Integración Numérica (Trapezoidal Rule)
+        #  y  validan np.trapz para el cálculo de áreas bajo curvas discretas.
+        # Pasamos 'x=time_vector' para asegurar que el área tenga unidades físicas (Litros).
+        area_deficit = np.trapz(deficit_vector, x=time_vector)
+        total_reference_area = np.trapz(reference_curve, x=time_vector)
+        
+        return area_deficit, total_reference_area
 
-        if segment.size < 5:
-            continue
+    @staticmethod
+    def detect_valley_double_trigger(time_vector, flow_vector):
+        """
+        Implementa la lógica de 'Umbral de Valle' para detección de Disparo Doble.
+        
+        Teoría:
+            El Disparo Doble consiste en dos esfuerzos apilados sin exhalación completa.
+            Característica Clave: El flujo desciende (formando un Valle) pero NO retorna
+            a la línea base (o fase espiratoria) antes de subir nuevamente.
+            
+        Algoritmo:
+            1. Encontrar Picos significativos.
+            2. Si hay >1 pico cercano, analizar el Valle (mínimo) entre ellos.
+            3. Aplicar Umbral de Valle: ¿Es el valle suficientemente profundo?
+            
+        Retorna:
+            bool: True si se detecta Disparo Doble (Breath Stacking).
+            dict: Métricas detalladas (profundidad del valle, ratios).
+        """
+        # Suavizar señal para evitar falsos positivos por ruido
+        smoothed_flow = WaveformProcessor.smooth_signal(flow_vector)
+        
+        # 1. Detección de Picos
+        # 'prominence' asegura que ignoramos micro-fluctuaciones.
+        # 'distance' evita detectar el mismo pico dos veces.
+        peaks, properties = find_peaks(smoothed_flow, prominence=5, distance=10)
+        
+        # Si no hay al menos dos picos, no puede haber doble disparo
+        if len(peaks) < 2:
+            return False, {"reason": "Picos insuficientes (<2)"}
+            
+        # Analizamos los dos primeros picos principales
+        p1_idx = peaks
+        p2_idx = peaks[1]
+        
+        # Verificación temporal: ¿Están los picos temporalmente "apilados"?
+        time_diff = time_vector[p2_idx] - time_vector[p1_idx]
+        if time_diff > AlgorithmConfig.DT_TIME_WINDOW_SEC:
+            return False, {"reason": "Picos demasiado separados", "time_diff": time_diff}
+            
+        # 2. Análisis del Valle (Morfología)
+        # Extraemos el segmento entre el Pico 1 y el Pico 2
+        segment = smoothed_flow[p1_idx:p2_idx]
+        valley_value = np.min(segment) # El punto más bajo de flujo entre esfuerzos
+        
+        # 3. Aplicación del Umbral de Valle (Valley Threshold Logic)
+        p1_amp = smoothed_flow[p1_idx]
+        
+        # Definición Matemática:
+        # Para respiraciones separadas, el valle debería acercarse a 0 o ser negativo.
+        # Para Double Trigger, el valle se mantiene alto ("sin exhalación considerable" ).
+        
+        is_double_trigger = False
+        ratio = 0.0
+        
+        if p1_amp > 0:
+            ratio = valley_value / p1_amp
+            
+            # SI el flujo en el valle es > 10% del pico (Ratio > 0.10),
+            # ENTONCES no hubo relajación suficiente -> Apilamiento Confirmado.
+            if ratio > AlgorithmConfig.VALLEY_RETENTION_RATIO:
+                is_double_trigger = True
+        
+        return is_double_trigger, {
+            "valley_flow": float(valley_value),
+            "peak1_flow": float(p1_amp),
+            "valley_retention_ratio": float(ratio),
+            "threshold_applied": AlgorithmConfig.VALLEY_RETENTION_RATIO,
+            "diagnosis": "Breath Stacking" if is_double_trigger else "Normal Cycling"
+        }
 
-        x_seg = np.arange(len(segment))
-        y_start = float(segment[0])
-        y_end = float(segment[-1])
+@app.route('/health', methods=)
+def health_check():
+    """Endpoint de verificación de estado del sistema."""
+    return jsonify({"status": "Phase 5 Algorithms Operational", "version": "5.0.1"}), 200
 
-        if len(segment) > 1:
-            slope = (y_end - y_start) / (len(segment) - 1)
-        else:
-            slope = 0
-
-        ideal_line = slope * x_seg + y_start
-        diff = ideal_line - segment
-        max_concavity = float(np.max(diff))
-
-        peak_height = max(1e-6, y_end - float(np.min(signal)))
-        normalized_concavity = max_concavity / peak_height
-
-        if normalized_concavity > 0.15:
-            mark_idx = start_insp + int(len(segment) / 2)
-            starvation_events.append(mark_idx)
-
-    return sorted(list(set(starvation_events)))
-
-def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
-    signal = np.asarray(signal_data, dtype=float)
-    results = {
-        "detected": False,
-        "event_count": 0,
-        "events": [],
-        "peaks": [],
-        "signal_processed": None,
-        "message": ""
-    }
-
-    if signal.size == 0:
-        results["message"] = "Señal vacía."
-        return results
-
+@app.route('/analyze/waveform', methods=)
+def analyze_waveform():
+    """
+    Endpoint Principal para Análisis de Precisión (Fase 5).
+    Recibe un payload JSON con vectores de tiempo y flujo.
+    """
     try:
-        window = 11
-        if window >= signal.size:
-            window = max(3, signal.size - (2 if signal.size % 2 == 0 else 1))
-        poly = 3
-        smoothed = savgol_filter(signal, window_length=window, polyorder=min(poly, window-1))
-    except:
-        smoothed = signal.copy()
-
-    results["signal_processed"] = smoothed
-
-    sig_min, sig_max = float(np.min(smoothed)), float(np.max(smoothed))
-    if sig_max - sig_min == 0:
-        results["message"] = "Señal plana."
-        return results
-
-    norm_sig = (smoothed - sig_min) / (sig_max - sig_min)
-
-    prominence_val = max(0.05, 0.6 - (sensitivity * 0.5))
-    min_dist = max(1, int(0.15 * sample_rate))
-
-    peaks, _ = find_peaks(norm_sig, prominence=prominence_val, distance=min_dist)
-    peaks = np.asarray(peaks, dtype=int)
-    results["peaks"] = peaks.tolist()
-
-    dt_thresh_sec = 0.8
-    dt_events = []
-
-    if peaks.size >= 2:
-        for i in range(peaks.size - 1):
-            t_diff = float(peaks[i+1] - peaks[i]) / float(sample_rate)
-            if 0 < t_diff < dt_thresh_sec:
-                dt_events.append({
-                    "peak1": int(peaks[i]),
-                    "peak2": int(peaks[i+1]),
-                    "time_diff": t_diff
-                })
-
-    results["events"] = dt_events
-    results["event_count"] = len(dt_events)
-    results["detected"] = len(dt_events) > 0
-    return results
-
-def analyze_ineffective_efforts(signal_data, major_peaks, sample_rate=50):
-    ie_events = []
-    signal = np.asarray(signal_data, dtype=float)
-    major_peaks_arr = np.asarray(major_peaks, dtype=int)
-
-    if major_peaks_arr.size < 2:
-        return ie_events
-
-    for i in range(major_peaks_arr.size - 1):
-        start = int(major_peaks_arr[i])
-        end = int(major_peaks_arr[i+1])
-
-        interval = end - start
-        if interval < 5:
-            continue
-
-        s_zone = start + int(interval * 0.25)
-        e_zone = end - int(interval * 0.15)
-
-        if e_zone <= s_zone:
-            continue
-
-        segment = signal[s_zone:e_zone]
-        if segment.size == 0:
-            continue
-
-        micro_peaks, _ = find_peaks(segment, prominence=0.02, width=3)
-        for mp in micro_peaks:
-            ie_events.append(int(s_zone + mp))
-
-    return sorted(list(set(ie_events)))
-
-# ==========================================
-# BLOQUE 3: Interfaz de Usuario (UI)
-# ==========================================
-
-def main():
-    st.title("🫁 Ventilator Lab: Análisis Multi-Modo")
-    st.markdown("""
-    **Sistema de Detección de Asincronías Fase 4**
-    """)
-
-    with st.sidebar:
-        st.header("Configuración Clínica")
-        curve_type = st.selectbox(
-            "¿Qué curva estás analizando?",
-            ["Flujo (Flow)", "Presión (Pressure/Paw)"],
-            index=0
+        data = request.get_json()
+        
+        # Validación de entrada básica
+        if not data or 'time' not in data or 'flow' not in data:
+            return jsonify({"error": "Datos de forma de onda incompletos (requiere 'time', 'flow')"}), 400
+            
+        # Conversión a arrays de Numpy para procesamiento de alta velocidad
+        time_vec = np.array(data['time'])
+        flow_vec = np.array(data['flow'])
+        breath_mode = data.get('mode', 'VC') # Por defecto asume Volumen Control
+        
+        # --- EJECUCIÓN DE ALGORITMOS DE PRECISIÓN ---
+        
+        # 1. Análisis de Inanición de Flujo (Área de Déficit)
+        deficit_area, ref_area = WaveformProcessor.calculate_area_of_deficit(
+            time_vec, flow_vec, breath_mode
         )
-        st.divider()
-        st.header("Ajuste Fino")
-        sensibilidad = st.slider("Sensibilidad", 0.0, 1.0, 0.5)
-        fs_estimada = int(st.number_input("Escala (px/seg estimados)", 10, 200, 50))
+        
+        # Clasificación de severidad basada en la magnitud del área
+        starvation_severity = "None"
+        if deficit_area > AlgorithmConfig.DEFICIT_AREA_THRESHOLD:
+            starvation_severity = "Severe" if deficit_area > (AlgorithmConfig.DEFICIT_AREA_THRESHOLD * 2) else "Moderate"
 
-    img_buffer = st.camera_input("📸 Capturar Pantalla")
+        # 2. Análisis de Disparo Doble (Umbral de Valle)
+        is_dt, dt_metrics = WaveformProcessor.detect_valley_double_trigger(
+            time_vec, flow_vec
+        )
+        
+        # Construcción de la respuesta JSON estructurada
+        response = {
+            "analysis_metadata": {
+                "phase": "Phase 5: Precision Algorithms",
+                "algorithm_version": "5.0.1"
+            },
+            "metrics": {
+                "flow_starvation": {
+                    "detected": deficit_area > AlgorithmConfig.DEFICIT_AREA_THRESHOLD,
+                    "area_of_deficit_value": float(round(deficit_area, 4)),
+                    "reference_area": float(round(ref_area, 4)),
+                    "deficit_percentage": float(round((deficit_area/ref_area)*100, 2)) if ref_area > 0 else 0,
+                    "severity": starvation_severity,
+                    "description": "Integral de la diferencia entre flujo ideal y real (Concavidad)"
+                },
+                "double_trigger": {
+                    "detected": is_dt,
+                    "valley_metrics": {k: float(round(v, 4)) if isinstance(v, (int, float)) else v for k, v in dt_metrics.items()},
+                    "diagnosis": dt_metrics["diagnosis"],
+                    "description": "Detección basada en retención de flujo en el valle inspiratorio"
+                }
+            }
+        }
+        
+        return jsonify(response), 200
 
-    if img_buffer:
-        bytes_data = img_buffer.getvalue()
-        img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+    except Exception as e:
+        logging.error(f"Error en Procesamiento de Onda: {str(e)}")
+        return jsonify({"error": "Error Interno de Procesamiento", "details": str(e)}), 500
 
-        if img is not None:
-            st.image(img, caption="Imagen Original", use_column_width=True)
-
-            with st.spinner("Digitalizando curva..."):
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                h, w = gray.shape
-                signal_raw = []
-
-                start_col = int(w * 0.1)
-                end_col = int(w * 0.9)
-
-                for col in range(start_col, end_col):
-                    col_data = gray[:, col]
-                    y_val = int(h - np.argmax(col_data))
-                    signal_raw.append(y_val)
-
-                signal_np = np.array(signal_raw)
-
-            analysis = analyze_double_trigger(signal_np, fs_estimada, sensibilidad)
-            processed_sig = analysis["signal_processed"]
-            major_peaks = analysis["peaks"]
-
-            major_peaks = [p for p in major_peaks if 0 <= p < len(processed_sig)]
-
-            ie_events = []
-            starvation_events = []
-
-            if "Flujo" in curve_type:
-                ie_events = analyze_ineffective_efforts(processed_sig, major_peaks, fs_estimada)
-
-            elif "Presión" in curve_type:
-                starvation_events = analyze_flow_starvation(processed_sig, major_peaks, fs_estimada)
-
-            metrics = analyze_clinical_metrics(major_peaks, len(signal_np), fs_estimada)
-
-            st.divider()
-
-            # KPIs
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Frecuencia (RPM)", f"{metrics['rr']} rpm")
-            k2.metric("Doble Disparo", analysis["event_count"])
-            k3.metric("Esfuerzos Inefectivos", len(ie_events))
-            k4.metric("Hambre de Flujo", len(starvation_events))
-
-            fig, ax = plt.subplots(figsize=(12, 5))
-            fig.patch.set_facecolor('#0e1117')
-            ax.set_facecolor('#1e1e1e')
-
-            line_color = 'yellow' if "Presión" in curve_type else 'cyan'
-            ax.plot(processed_sig, color=line_color, linewidth=2)
-
-            if len(major_peaks) > 0:
-                ax.scatter(
-                    major_peaks,
-                    processed_sig[major_peaks],
-                    color='white', s=30
-                )
-
-            # Double trigger
-            for evt in analysis["events"]:
-                p1, p2 = evt["peak1"], evt["peak2"]
-                if p1 < len(processed_sig) and p2 < len(processed_sig):
-                    ax.plot(
-                        [p1, p2],
-                        [processed_sig[p1], processed_sig[p2]],
-                        color='red',
-                        linewidth=3,
-                        linestyle='--'
-                    )
-                    ax.text(
-                        p2,
-                        processed_sig[p2] + 10,
-                        "DT",
-                        color='red',
-                        fontsize=12,
-                        fontweight='bold'
-                    )
-
-            # IE
-            if len(ie_events) > 0:
-                ie_events = [i for i in ie_events if 0 <= i < len(processed_sig)]
-                y_ie = processed_sig[ie_events]
-                ax.scatter(
-                    ie_events,
-                    y_ie,
-                    color='orange',
-                    marker='x',
-                    s=100,
-                    linewidth=3
-                )
-
-            # ==========================================
-            # BLOQUE FS — CORRECTAMENTE INDENTADO
-            # ==========================================
-            if len(starvation_events) > 0:
-                starvation_events = [
-                    i for i in starvation_events
-                    if 0 <= i < len(processed_sig)
-                ]
-
-                y_fs = processed_sig[starvation_events]
-
-                ax.scatter(
-                    starvation_events,
-                    y_fs,
-                    color='magenta',
-                    marker='D',
-                    s=90,
-                    linewidth=2
-                )
-
-            st.pyplot(fig)
-
-# Ejecutar
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    # Configuración de ejecución para desarrollo
+    # Para producción, desplegar tras servidor WSGI (Gunicorn/uWSGI)
+    app.run(host='0.0.0.0', port=5000, debug=True)
