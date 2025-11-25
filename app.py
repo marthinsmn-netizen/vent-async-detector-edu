@@ -263,5 +263,7 @@ def main():
 
             # FS
             if len(starva) > 0:
-    procesar_eventos(starva)
+    # acción cuando la lista no está vacía
+    results["detected"] = True
+
 
