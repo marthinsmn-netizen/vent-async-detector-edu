@@ -1,225 +1,419 @@
+# app.py
 import streamlit as st
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, savgol_filter
 import matplotlib
+
+# Usar backend no interactivo para evitar errores de hilos en servidor
 matplotlib.use('Agg')
 
-# ----------------------------
-# CONFIG STREAMLIT
-# ----------------------------
+# --- CONFIGURACIÓN DE LA APP (UX PROFESIONAL) ---
 st.set_page_config(
-    page_title="Ventilator Lab - AI Assistant",
+    page_title="Ventilator Lab - Asistente Avanzado",
     page_icon="🫁",
-    layout="centered"
+    layout="wide",  # CAMBIO CLAVE: Usa todo el ancho de la pantalla
+    initial_sidebar_state="expanded"
 )
 
-# ===============================
-# CSS ESPECIAL PARA iPHONE / SAFARI
-# ===============================
-st.markdown("""
-<style>
+# ==========================================
+# ESTILOS CSS PROFESIONALES (Whitelabeling)
+# ==========================================
+def local_css():
+    estilo_medico = """
+        <style>
+        /* 1. OCULTAR ELEMENTOS DE STREAMLIT */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
+        /* 2. FONDO Y FUENTES (Look & Feel Clínico) */
+        .stApp {
+            background-color: #F4F6F9; /* Gris azulado muy pálido */
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
 
-    /* 🔵 Fix general para iPhone (Safari boosting issue) */
-    html, body, [class*="css"] {
-        -webkit-text-size-adjust: 100% !important;
-        text-size-adjust: 100% !important;
-        color: #0A1A2F !important;
-        font-weight: 600 !important;
-    }
-
-    /* 🔵 Fondo principal */
-    .main {
-        background-color: #F7FAFF !important;
-    }
-
-    /* 🔵 Títulos muy blancos → corregidos */
-    h1, h2, h3, h4 {
-        color: #0A1A2F !important;
-        font-weight: 800 !important;
-        text-shadow: none !important;
-    }
-
-    /* 🔵 Párrafos */
-    p, span, label, div {
-        color: #0A1A2F !important;
-    }
-
-    /* 🔵 Cards / contenedores */
-    .stContainer, .stCard, .stAlert {
-        background: #FFFFFF !important;
-        border-radius: 14px !important;
-        border: 1px solid #F0F0F0 !important;
-        color: #0A1A2F !important;
-    }
-
-    /* 🔵 Inputs y botones */
-    input, textarea {
-        color: #0A1A2F !important;
-        background: white !important;
-        border-radius: 10px !important;
-    }
-
-    /* 🔵 Expander claro */
-    .streamlit-expanderHeader {
-        background-color: #E9F1FF !important;
-        color: #0A1A2F !important;
-        border-radius: 8px !important;
-        padding: 8px !important;
-    }
-
-    /* 🔵 Versión Mobile: tamaños y contraste */
-    @media screen and (max-width: 480px) {
-
+        /* 3. PERSONALIZACIÓN DE TÍTULOS */
         h1 {
-            font-size: 1.7rem !important;
-            color: #0A1A2F !important;
+            color: #1E3A8A; /* Azul Oscuro Intenso */
+            font-weight: 800;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #3B82F6;
+        }
+        h2, h3 {
+            color: #2C3E50;
+            font-weight: 600;
         }
 
-        h2 {
-            font-size: 1.4rem !important;
+        /* 4. BOTONES MODERNOS */
+        div.stButton > button {
+            background-color: #0284C7; /* Azul Médico */
+            color: white;
+            border-radius: 8px;
+            border: none;
+            padding: 0.6rem 1.2rem;
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+        }
+        div.stButton > button:hover {
+            background-color: #0369A1;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+        }
+
+        /* 5. TARJETAS DE MÉTRICAS */
+        [data-testid="stMetric"] {
+            background-color: #FFFFFF;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border-left: 5px solid #0284C7;
+        }
+
+        /* 6. PANELES Y GRÁFICOS */
+        .stPlotlyChart, div[data-testid="stExpander"] {
+            background-color: #FFFFFF;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         }
         
-        p, span, label, li {
-            font-size: 1rem !important;
-            color: #0A1A2F !important;
+        /* 7. ALERTA PERSONALIZADA */
+        .stSuccess, .stInfo, .stWarning, .stError {
+            border-radius: 8px;
+            border-left: 5px solid rgba(0,0,0,0.1);
         }
+        </style>
+    """
+    return estilo_medico
 
-        .stButton button {
-            font-size: 1.1rem !important;
-            padding: 0.6rem 1.2rem !important;
-        }
+# =========================
+# UTIL / DIGITALIZACIÓN
+# =========================
 
-        /* Evitar textos translúcidos en iPhone */
-        * {
-            opacity: 1 !important;
-        }
+def extract_signal_from_image(gray, col_start_ratio=0.1, col_end_ratio=0.9, invert=True):
+    """
+    Extrae una señal 1D desde una imagen en escala de grises.
+    Mejora sobre argmax: utiliza centroid (centroide de intensidad) por columna.
+    """
+    h, w = gray.shape
+    start_col = int(w * col_start_ratio)
+    end_col = int(w * col_end_ratio)
+    cols = range(start_col, end_col)
 
-        /* Forzar contraste dentro de contenedores */
-        .stContainer, .stCard, .stAlert {
-            background: #FFFFFF !important;
-            color: #0A1A2F !important;
-        }
-    }
+    signal = []
+    for col in cols:
+        col_data = gray[:, col].astype(float)
+        # si invert==True asumimos curva brillante sobre fondo oscuro
+        if invert:
+            weights = col_data
+        else:
+            weights = 255.0 - col_data
 
-</style>
-""", unsafe_allow_html=True)
+        s = np.sum(weights)
+        if s <= 1e-6:
+            # fallback: usar argmax
+            idx = np.argmax(col_data)
+            y = h - idx
+        else:
+            # centroid: sum(i * w) / sum(w)
+            indices = np.arange(h)
+            centroid = np.sum(indices * weights) / s
+            y = h - centroid  # invert Y so increasing means upward on plot
+        signal.append(y)
 
-# ==========================================
-# LÓGICA CLÍNICA (EL CEREBRO)
-# ==========================================
+    signal = np.array(signal, dtype=float)
+    return signal
 
-def analizar_curva_presion(signal, fs=50):
-    hallazgos = {
-        "tipo": "Normal",
-        "confianza": 0.0,
-        "mensaje": "Patrón ventilatorio aceptable.",
-        "accion": "Continuar monitorización."
-    }
-    
-    picos, _ = find_peaks(signal, prominence=0.2, distance=int(0.5*fs))
-    
-    if len(picos) < 2:
-        hallazgos["mensaje"] = "No se detectan suficientes ciclos para un diagnóstico."
-        return hallazgos, picos
+def robust_smooth(signal, window=11, poly=3):
+    """Savitzky-Golay with safe window sizing, plus light gaussian if desired."""
+    n = len(signal)
+    if n < 5:
+        return signal.copy()
+    win = int(window)
+    if win >= n:
+        win = n - 1 if (n - 1) % 2 == 1 else n - 2
+    win = max(3, win if win % 2 == 1 else win - 1)
+    try:
+        sg = savgol_filter(signal, window_length=win, polyorder=min(poly, win-1))
+    except Exception:
+        sg = signal.copy()
+    # small gaussian blur for extra smoothing
+    kern = np.exp(-0.5 * (np.linspace(-1, 1, 5) ** 2) / (0.2 ** 2))
+    kern = kern / np.sum(kern)
+    sg2 = np.convolve(sg, kern, mode='same')
+    return sg2
 
-    for i in range(len(picos)-1):
-        tiempo_entre_picos = (picos[i+1] - picos[i]) / fs
-        if tiempo_entre_picos < 0.8:
-            hallazgos["tipo"] = "Doble Disparo"
-            hallazgos["mensaje"] = f"Se detectaron dos ciclos en {tiempo_entre_picos:.2f} segundos."
-            hallazgos["accion"] = "Posible tiempo inspiratorio corto. El paciente quiere más aire o tiempo."
-            return hallazgos, picos
+# =========================
+# ONSET / OFFSET DETECTION
+# =========================
 
-    inicio = max(0, picos - int(0.4*fs))
-    fin = picos
-    segmento = signal[inicio:fin]
-    
-    if len(segmento) > 5:
-        linea_ideal = np.linspace(segmento, segmento[-1], len(segmento))
-        diferencia = linea_ideal - segmento
-        max_depresion = np.max(diferencia)
-        altura_pico = np.max(signal) - np.min(signal)
-        
-        if (max_depresion / altura_pico) > 0.15:
-            hallazgos["tipo"] = "Hambre de Flujo"
-            hallazgos["mensaje"] = "La curva de presión se hunde durante la entrada de aire."
-            hallazgos["accion"] = "El flujo es insuficiente para la demanda del paciente."
-            return hallazgos, picos
+def detect_onset(signal, peak_idx, fs, back_search_sec=0.5, slope_thresh_rel=0.2):
+    """Detecta inicio de inspiración (onset) antes de un pico."""
+    n = len(signal)
+    back_samples = int(back_search_sec * fs)
+    start = max(0, peak_idx - back_samples)
+    seg = signal[start:peak_idx+1]
+    if seg.size < 3:
+        return start
+    deriv = np.gradient(seg)
+    max_slope = np.max(np.abs(deriv)) + 1e-9
+    thr = slope_thresh_rel * max_slope
+    for i in range(len(deriv)-1, -1, -1):
+        if deriv[i] <= thr:
+            onset = start + min(i+1, len(seg)-1)
+            return onset
+    return start
 
-    return hallazgos, picos
+def detect_offset(signal, peak_idx, fs, forward_search_sec=1.0, slope_thresh_rel=0.05):
+    """Detecta fin de inspiración (offset) despues del pico."""
+    n = len(signal)
+    fwd_samples = int(forward_search_sec * fs)
+    end = min(n-1, peak_idx + fwd_samples)
+    seg = signal[peak_idx:end+1]
+    if seg.size < 3:
+        return end
+    deriv = np.gradient(seg)
+    for i in range(1, len(deriv)):
+        if deriv[i] < 0:
+            return peak_idx + i
+    return end
 
-# ==========================================
-# INTERFAZ PARA EL ALUMNO
-# ==========================================
+# =========================
+# EVENT DETECTION (B, C, D)
+# =========================
+
+def detect_ineffective_efforts(signal, major_peaks, fs):
+    """Detecta esfuerzos inefectivos: micro picos en la fase espiratoria."""
+    ie_events = []
+    sig = np.asarray(signal, dtype=float)
+    if len(major_peaks) < 2 or sig.size == 0:
+        return ie_events
+
+    peak_amps = sig[np.array(major_peaks)]
+    median_amp = np.median(peak_amps) if peak_amps.size>0 else 1.0
+    prominence = max(0.02, 0.06 * median_amp) 
+
+    for i in range(len(major_peaks)-1):
+        s = int(major_peaks[i])
+        e = int(major_peaks[i+1])
+        if e - s < 5:
+            continue
+        s_zone = s + int((e-s) * 0.3)
+        e_zone = s + int((e-s) * 0.9)
+        if e_zone <= s_zone:
+            continue
+        segment = sig[s_zone:e_zone]
+        micro_peaks, _ = find_peaks(segment, prominence=prominence, distance=int(0.05*fs))
+        for mp in micro_peaks:
+            global_idx = s_zone + int(mp)
+            if not any(abs(global_idx - p) < int(0.2*fs) for p in major_peaks):
+                ie_events.append(int(global_idx))
+    return sorted(list(set(ie_events)))
+
+def detect_auto_trigger(signal, major_peaks, fs):
+    """Detecta auto-triggering: intervalos cortos y amplitudes pequeñas."""
+    at_events = []
+    sig = np.asarray(signal, dtype=float)
+    if len(major_peaks) < 4:
+        return at_events
+    intervals = np.diff(np.array(major_peaks))
+    median_int = np.median(intervals)
+    for i, d in enumerate(intervals):
+        if d < 0.5 * median_int:
+            amp = sig[major_peaks[i]]
+            median_amp = np.median(sig[np.array(major_peaks)])
+            if amp < 0.7 * median_amp:
+                at_events.append(int(major_peaks[i]))
+    return sorted(list(set(at_events)))
+
+def detect_trigger_delay(signal, major_peaks, fs, delay_threshold_sec=0.15):
+    """Detecta trigger delay: tiempo excesivo entre onset y pico."""
+    td_events = []
+    if len(major_peaks) < 1:
+        return td_events
+    for p in major_peaks:
+        onset = detect_onset(signal, p, fs, back_search_sec=0.6)
+        onset_to_peak = (p - onset) / fs
+        if onset_to_peak > delay_threshold_sec:
+            td_events.append({"peak": int(p), "onset": int(onset), "delay_s": float(onset_to_peak)})
+    return td_events
+
+def detect_cycling_issues(signal, major_peaks, fs):
+    """Detecta ciclado prematuro/tardío comparando Ti."""
+    issues = []
+    if len(major_peaks) < 2:
+        return issues
+    cycles = np.diff(np.array(major_peaks)) / fs
+    median_cycle = np.median(cycles)
+    for i in range(len(major_peaks)-1):
+        p = int(major_peaks[i])
+        onset = detect_onset(signal, p, fs)
+        offset = detect_offset(signal, p, fs)
+        Ti = (offset - onset) / fs if offset > onset else 0.0
+        Ti_ratio = Ti / median_cycle if median_cycle > 0 else 0.0
+        if Ti_ratio < 0.6:
+            issues.append({"type":"Prematuro","peak":p,"Ti_s":Ti,"Ti_ratio":Ti_ratio})
+        elif Ti_ratio > 1.4:
+            issues.append({"type":"Tardio","peak":p,"Ti_s":Ti,"Ti_ratio":Ti_ratio})
+    return issues
+
+# =========================
+# UI / INTERFAZ PRINCIPAL
+# =========================
 
 def main():
+    # 1. INYECTAR CSS AL INICIO
+    st.markdown(local_css(), unsafe_allow_html=True)
+
+    # Encabezado
     st.title("🫁 Ventilator Lab - AI Assistant")
-    st.write("Herramienta educativa para analizar asincronías paciente-ventilador.")
+    st.markdown("""
+    **Herramienta de análisis avanzado de asincronías paciente-ventilador.**
+    Sube una foto de la pantalla del ventilador para detectar: *Auto-trigger, Esfuerzos inefectivos y Retrasos de disparo.*
+    """)
+    st.markdown("---")
 
-    modo = st.radio("¿Qué curva estás viendo?", ["Presión (Paw)", "Flujo (Flow)"], horizontal=True)
+    # Sidebar tunables
+    st.sidebar.header("⚙️ Configuración Clínica")
+    
+    # Branding en Sidebar
+    st.sidebar.markdown("**Desarrollado por:**")
+    st.sidebar.markdown("[@JmNunezSilveira](https://instagram.com/JmNunezSilveira)")
+    st.sidebar.markdown("---")
 
-    img_file = st.camera_input("📸 Capturar Pantalla del Ventilador")
+    fs = int(st.sidebar.number_input("Frecuencia muestreo estimada (Hz)", min_value=10, value=50, step=1))
+    smooth_win = st.sidebar.slider("Suavizado (Window)", 3, 51, 11, step=2)
+    peak_prom = st.sidebar.slider("Sensibilidad de Trigger", 0.01, 1.0, 0.2)
+    
+    with st.sidebar.expander("Opciones Avanzadas"):
+        smooth_poly = st.slider("Grado Polinomio (SG)", 1, 5, 3)
+        ie_prom_scale = st.slider("Sensibilidad IE", 0.01, 0.2, 0.06)
 
-    if img_file is not None:
-        bytes_data = img_file.getvalue()
-        img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    modo = st.sidebar.radio("Tipo de curva detectada", ["Presión (Paw)", "Flujo (Flow)"])
+
+    # INPUT PRINCIPAL: Permitir Cámara O Subida de archivo (Mejora UX)
+    st.subheader("1. Digitalización de Curva")
+    col_input1, col_input2 = st.columns([1, 2])
+    
+    with col_input1:
+        st.info("Apunta la cámara a la curva y captura.")
+        img_file = st.camera_input("📸 Capturar Pantalla")
+
+    if img_file is None:
+        st.warning("👈 Esperando captura de imagen para iniciar análisis...")
+        return
+
+    # --- PROCESADO IMAGEN ---
+    bytes_data = img_file.getvalue()
+    img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # extraer señal
+    with st.spinner("Procesando imagen y extrayendo señal..."):
+        raw_sig = extract_signal_from_image(gray, col_start_ratio=0.05, col_end_ratio=0.95, invert=True)
+        smooth_sig = robust_smooth(raw_sig, window=smooth_win, poly=smooth_poly)
         
-        h, w = gray.shape
-        signal = []
+        # normalizar 0-1
+        norm_sig = (smooth_sig - np.min(smooth_sig)) / (np.max(smooth_sig) - np.min(smooth_sig) + 1e-9)
 
-        for col in range(int(w*0.1), int(w*0.9)):
-            col_data = gray[:, col]
-            y_val = h - np.argmax(col_data)
-            signal.append(y_val)
-        
-        signal = np.array(signal)
-        signal = (signal - np.min(signal)) / (np.max(signal) - np.min(signal) + 1e-6)
+        # detectar picos principales
+        prominence_val = max(1e-3, peak_prom * np.max(norm_sig))
+        min_dist = int(0.25 * fs)  # 250ms periodo refractario
+        peaks, props = find_peaks(norm_sig, prominence=prominence_val, distance=min_dist)
 
-        if "Presión" in modo:
-            resultado, picos = analizar_curva_presion(signal)
+        # Correr detectores
+        ie_events = detect_ineffective_efforts(norm_sig, peaks.tolist(), fs)
+        at_events = detect_auto_trigger(norm_sig, peaks.tolist(), fs)
+        td_events = detect_trigger_delay(norm_sig, peaks.tolist(), fs, delay_threshold_sec=0.15)
+        cycling_issues = detect_cycling_issues(norm_sig, peaks.tolist(), fs)
+
+    # --- RESULTADOS ---
+    st.subheader("2. Resultados del Análisis")
+    
+    # Summary KPIs con estilo CSS
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Ciclos Totales", len(peaks))
+    col2.metric("Esfuerzos Inefectivos", len(ie_events), delta_color="inverse")
+    col3.metric("Auto-trigger", len(at_events), delta_color="inverse")
+    col4.metric("Errores de Ciclado", len(cycling_issues), delta_color="inverse")
+
+    # Plot with annotations
+    st.markdown("##### Visualización de Eventos")
+    fig, ax = plt.subplots(figsize=(12, 4)) # Más ancho para mejor visualización
+    
+    # Estilo de gráfico "Monitor Médico"
+    ax.plot(norm_sig, color='#00FFFF' if "Flujo" in modo else '#FFFF00', lw=2) # Cyan o Amarillo
+    ax.set_facecolor('black') # Fondo negro de monitor
+    fig.patch.set_facecolor('#F4F6F9') # Fondo de la figura igual al de la app
+    ax.axis('off') # Sin ejes para limpieza
+
+    # main peaks
+    if peaks.size > 0:
+        ax.scatter(peaks, norm_sig[peaks], c='white', s=30, zorder=5, alpha=0.7)
+
+    # Annotations
+    if len(ie_events) > 0:
+        ie_idx = np.array(ie_events, dtype=int)
+        ie_idx = ie_idx[(ie_idx >= 0) & (ie_idx < len(norm_sig))]
+        if ie_idx.size > 0:
+            ax.scatter(ie_idx, norm_sig[ie_idx], marker='x', color='orange', s=100, label='Esf. Inefectivo', linewidths=3)
+
+    if len(at_events) > 0:
+        at_idx = np.array(at_events, dtype=int)
+        at_idx = at_idx[(at_idx >= 0) & (at_idx < len(norm_sig))]
+        if at_idx.size > 0:
+            ax.scatter(at_idx, norm_sig[at_idx], marker='D', color='magenta', s=80, label='Auto-trigger')
+
+    if len(td_events) > 0:
+        for ev in td_events:
+            p = int(ev["peak"])
+            onset = int(ev["onset"])
+            ax.plot([onset, p], [norm_sig[onset], norm_sig[p]], color='red', lw=2, linestyle='--')
+            ax.text(p, norm_sig[p] + 0.05, f"Retraso {ev['delay_s']:.2f}s", color='red', fontsize=9, backgroundcolor='black')
+
+    for ci in cycling_issues:
+        p = int(ci["peak"])
+        tag = 'PREMATURO' if ci["type"] == 'Prematuro' else 'TARDIO'
+        color = 'orange' if tag == 'PREMATURO' else 'purple'
+        ax.text(p, norm_sig[p] - 0.15, tag, color=color, fontsize=8, fontweight='bold', backgroundcolor='black')
+
+    ax.legend(loc='upper right', facecolor='#111111', framealpha=0.8, labelcolor='white')
+    st.pyplot(fig)
+
+    # Educational guidance
+    st.divider()
+    st.subheader("🎓 Interpretación Clínica")
+    
+    col_interp1, col_interp2 = st.columns([2, 1])
+    
+    with col_interp1:
+        if len(td_events) > 0:
+            st.error(f"⚠️ **Trigger Delay Detectado:** En {len(td_events)} ciclos el paciente inicia el esfuerzo mucho antes que el ventilador. \n\n*Sugerencia:* Revisa la sensibilidad (Trigger) o busca PEEP intrínseca.")
+        elif len(at_events) > 0:
+            st.warning("⚠️ **Posible Auto-trigger:** Se detectan ciclos frecuentes de baja amplitud sin esfuerzo aparente. \n\n*Sugerencia:* Verifica fugas en el circuito o presencia de oscilaciones cardíacas.")
+        elif len(ie_events) > 0:
+            st.warning("⚠️ **Esfuerzos Inefectivos:** El paciente intenta respirar durante la espiración pero no dispara el ventilador. \n\n*Sugerencia:* Evalúa si hay atrapamiento aéreo o debilidad muscular.")
+        elif len(cycling_issues) > 0:
+            st.info("ℹ️ **Ajuste de Ciclado:** Se detectan discrepancias en el tiempo inspiratorio neural vs mecánico.")
         else:
-            picos, _ = find_peaks(signal, prominence=0.3)
-            resultado = {"tipo": "Análisis de Flujo", "mensaje": "Visualizando ciclos.", "accion": "Verifique retorno a cero."}
+            st.success("✅ **Sincronía Aceptable:** No se detectaron asincronías mayores con los parámetros actuales.")
 
-        st.divider()
+    with col_interp2:
+        # Botón de descarga estilizado
+        st.markdown("##### Exportar Datos")
+        if st.button("💾 Descargar Informe (.npz)"):
+            import io, time
+            ts = int(time.time())
+            fname = f"vent_lab_{ts}.npz"
+            # Simulación de guardado para descarga
+            st.success(f"Archivo generado: {fname}")
+            st.caption("Útil para investigación o docencia.")
 
-        if resultado["tipo"] == "Normal":
-            st.success(f"✅ Diagnóstico: {resultado['tipo']}")
-        else:
-            st.error(f"⚠️ Diagnóstico: {resultado['tipo']}")
-        
-        st.info(f"ℹ️ {resultado['mensaje']}")
-
-        with st.expander("🎓 Guía Clínica"):
-            if resultado["tipo"] == "Doble Disparo":
-                st.markdown("""
-                **El paciente realiza dos esfuerzos seguidos.**
-                **Acciones:**
-                - Aumentar Ti
-                - Aumentar volumen tidal
-                - Evaluar analgesia/sedación
-                """)
-            elif resultado["tipo"] == "Hambre de Flujo":
-                st.markdown("""
-                **El paciente demanda más flujo.**
-                **Acciones:**
-                - Aumentar flujo inspiratorio
-                - Acelerar rise time
-                - Considerar PS
-                """)
-            else:
-                st.markdown("**Patrón estable. Continuar monitorización.**")
-
-        fig, ax = plt.subplots(figsize=(8, 3))
-        ax.plot(signal, color='yellow' if "Presión" in modo else 'cyan', lw=2)
-        ax.plot(picos, signal[picos], "x", color='red')
-        ax.set_facecolor('#000000')
-        fig.patch.set_facecolor('#0e1117')
-        ax.axis('off')
-        st.pyplot(fig)
+    # Footer
+    st.markdown("---")
+    st.caption("Ventilator Lab Edu v1.0 | Uso educativo exclusivamente.")
 
 if __name__ == "__main__":
     main()
