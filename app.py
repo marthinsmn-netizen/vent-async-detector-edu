@@ -263,3 +263,5 @@ def main():
 
             # FS
             if len(starva) > 0:
+    procesar_eventos(starva)
+
