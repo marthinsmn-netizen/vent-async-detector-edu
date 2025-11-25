@@ -262,4 +262,4 @@ def main():
                 ax.scatter(ie_events, y_ie, color='orange', marker='x', s=100, linewidth=3)
 
             # FS
-            if len(starva
+            if len(starva)
