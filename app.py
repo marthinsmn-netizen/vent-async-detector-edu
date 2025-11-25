@@ -26,43 +26,28 @@ st.set_page_config(
 def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     """
     Detecta eventos de Doble Disparo en una señal unidimensional de ventilación.
-    
-    Args:
-        signal_data (np.array): Vector 1D con los valores de amplitud (Flujo/Presión).
-        sample_rate (int): Frecuencia de muestreo estimada (Hz). Por defecto 50.
-                           En imágenes, esto depende de la escala temporal horizontal.
-        sensitivity (float): Ajuste fino para la detección de picos (0.0 a 1.0).
-                             Mayor sensibilidad = detecta picos más pequeños (más falsos positivos).
-    
-    Returns:
-        dict: Resultados incluyendo índices de picos, eventos DT, señal suavizada y métricas.
     """
+    # CORRECCIÓN: Usamos un solo '=' para asignar
     results = {
-       results == {
         "detected": False,
         "event_count": 0,
-        "events": list(), 
-        "peaks": list(),   
+        "events":, 
+        "peaks":,   
         "signal_processed": None,
         "message": ""
-    }}
+    }
 
     # --- Paso 1: Preprocesamiento y Suavizado ---
-    # Las señales extraídas de imágenes tienen ruido de cuantización.
-    # Aplicamos filtro Savitzky-Golay que es superior a la media móvil para conservar picos.
-    # window_length debe ser impar y polyorder < window_length.
     try:
-        window = 11  # Ventana de suavizado
-        poly = 3     # Orden del polinomio
+        window = 11 
+        poly = 3     
         smoothed = savgol_filter(signal_data, window_length=window, polyorder=poly)
     except Exception as e:
-        # Fallback si la señal es muy corta
         smoothed = signal_data
     
     results["signal_processed"] = smoothed
 
     # --- Paso 2: Normalización ---
-    # Normalizamos la señal a rango  para usar umbrales de prominencia universales.
     sig_min, sig_max = np.min(smoothed), np.max(smoothed)
     if sig_max - sig_min == 0:
         results["message"] = "Señal plana o sin variación detectada."
@@ -71,19 +56,10 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     norm_sig = (smoothed - sig_min) / (sig_max - sig_min)
 
     # --- Paso 3: Configuración de Parámetros de Find_Peaks ---
-    # Prominencia: Inversamente proporcional a la sensibilidad.
-    # Sensibilidad 1.0 -> Prominencia 0.1 (detecta todo).
-    # Sensibilidad 0.1 -> Prominencia 0.6 (solo picos muy grandes).
     prominence_val = max(0.1, 0.6 - (sensitivity * 0.5))
-    
-    # Distancia Mínima: Refractariedad fisiológica absoluta.
-    # Incluso en DT, los picos no están pegados instantáneamente. Asumimos min 0.2s.
     min_dist_samples = int(0.2 * sample_rate)
-    
-    # Ancho Mínimo: Evita detectar ruido de "spike" (un solo punto alto).
     min_width_samples = int(0.05 * sample_rate)
 
-    # Ejecución del algoritmo scipy.signal.find_peaks
     peaks, properties = find_peaks(
         norm_sig,
         prominence=prominence_val,
@@ -93,12 +69,10 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
     results["peaks"] = peaks
 
     # --- Paso 4: Lógica de Detección de Doble Disparo ---
-    # Definición: Dos ciclos separados por un tiempo espiratorio muy corto.
-    # Umbral de tiempo crítico: < 0.8 segundos entre inicios de inspiración.
     dt_threshold_seconds = 1.0 
     dt_threshold_samples = dt_threshold_seconds * sample_rate
     
-    dt_events = list()# Lista vacia corregida
+    dt_events = # Lista vacía explícita
     
     if len(peaks) >= 2:
         for i in range(len(peaks) - 1):
@@ -108,17 +82,9 @@ def analyze_double_trigger(signal_data, sample_rate=50, sensitivity=0.5):
             interval_samples = idx_next - idx_current
             interval_seconds = interval_samples / sample_rate
             
-            # Criterio 1: Proximidad Temporal
             if interval_samples < dt_threshold_samples:
-                
-                # Criterio 2: Análisis del Valle (Breath Stacking)
-                # Buscamos el punto mínimo entre los dos picos.
-                # Si el valor mínimo es alto (lejos del 0 relativo), indica que no hubo exhalación.
                 segment = norm_sig[idx_current:idx_next]
                 valley_min = np.min(segment)
-                
-                # Umbral de valle: Si el valle está por encima del 20% de la amplitud, 
-                # es probable que sea un doble disparo con stacking.
                 stacking_severity = valley_min 
                 
                 event_data = {
