@@ -3,5 +3,5 @@ numpy
 matplotlib
 scipy
 opencv-python-headless
-google-generativeai  <-- NUEVO
-pillow               <-- NUEVO
+Pillow
+google-generativeai
