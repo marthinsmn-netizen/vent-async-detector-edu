@@ -7,8 +7,9 @@ import matplotlib
 from PIL import Image
 import io
 import google.generativeai as genai
+import time
 
-# Usar backend no interactivo para evitar errores de hilos en Streamlit Cloud
+# Usar backend no interactivo
 matplotlib.use('Agg')
 
 # --- Configuración Estética ---
@@ -25,52 +26,58 @@ st.set_page_config(
 
 def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
     """
-    Envía la imagen a Google Gemini actuando como médico experto.
+    Intenta conectar con varios modelos de Gemini hasta encontrar uno disponible.
     """
     if not api_key:
-        return "⚠️ Por favor, introduce tu Google API Key en la barra lateral para usar la IA."
+        return "⚠️ Por favor, introduce tu Google API Key en la barra lateral."
 
-    try:
-        # Configurar API
-        genai.configure(api_key=api_key)
-        
-        # CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash-latest' para evitar errores de versión
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    # Lista de modelos a probar (del más nuevo al más antiguo/estable)
+    modelos_a_probar = [
+        "gemini-1.5-flash",          # Opción 1: El más rápido y nuevo
+        "gemini-1.5-flash-latest",   # Opción 2: Alias de la última versión
+        "gemini-1.5-flash-001",      # Opción 3: Versión específica
+        "gemini-1.5-pro",            # Opción 4: Modelo más potente
+        "gemini-pro-vision"          # Opción 5: Modelo antiguo (Fallback seguro)
+    ]
 
-        # Convertir bytes a imagen PIL
-        image_pil = Image.open(io.BytesIO(image_bytes))
+    genai.configure(api_key=api_key)
+    image_pil = Image.open(io.BytesIO(image_bytes))
 
-        # El Prompt (El ROL de experto)
-        prompt = f"""
-        Actúa como un Médico Intensivista experto en Ventilación Mecánica y análisis de asincronías.
-        Analiza esta imagen de la pantalla de un ventilador mecánico.
-        
-        Contexto: El usuario indica que es una curva de {tipo_curva}.
-        
-        Tu tarea:
-        1. Valida si la curva es legible.
-        2. Busca asincronías específicas (Doble Disparo, Hambre de Flujo, Ciclado Retrasado/Prematuro, Esfuerzos Inefectivos).
-        3. Si detectas una anomalía, explica la morfología visual (ej: "se observa una muesca en la rama inspiratoria").
-        4. Da una recomendación clínica breve y segura.
-        
-        Sé conciso. Si la curva parece normal, indícalo.
-        """
-        
-        with st.spinner('🤖 El Intensivista AI está analizando la imagen...'):
-            response = model.generate_content([prompt, image_pil])
-            return response.text
+    prompt = f"""
+    Actúa como un Médico Intensivista experto en Ventilación Mecánica.
+    Analiza esta imagen de la pantalla de un ventilador (Curva de {tipo_curva}).
+    
+    1. Valida si la curva es legible.
+    2. Busca asincronías (Doble Disparo, Hambre de Flujo, Ciclado Retrasado, Esfuerzos Inefectivos).
+    3. Explica la morfología visual brevemente.
+    4. Da una recomendación clínica concisa.
+    """
 
-    except Exception as e:
-        return f"❌ Error de conexión con la IA: {str(e)}\n\n(Prueba actualizando 'requirements.txt' a 'google-generativeai>=0.7.2')"
+    errores_acumulados = []
+
+    for nombre_modelo in modelos_a_probar:
+        try:
+            # Intentamos configurar el modelo actual del bucle
+            model = genai.GenerativeModel(nombre_modelo)
+            
+            with st.spinner(f'🤖 Consultando al experto (Intentando con {nombre_modelo})...'):
+                # Llamada a la API
+                response = model.generate_content([prompt, image_pil])
+                return response.text # ¡Éxito! Retornamos la respuesta y salimos
+                
+        except Exception as e:
+            # Si falla, guardamos el error y el bucle continuará con el siguiente modelo
+            errores_acumulados.append(f"{nombre_modelo}: {str(e)}")
+            time.sleep(1) # Pequeña pausa antes de reintentar
+
+    # Si llegamos aquí, fallaron todos los modelos
+    return f"❌ No se pudo conectar con ningún modelo de IA.\n\nDetalles técnicos:\n" + "\n".join(errores_acumulados)
 
 # ==========================================
 # 2. LÓGICA MATEMÁTICA (OPENCV)
 # ==========================================
 
 def analizar_curva_matematica(signal, tipo_curva, fs=50):
-    """
-    Análisis rápido basado en geometría de la curva.
-    """
     hallazgos = {
         "diagnostico": "Patrón Estable (Análisis Geométrico)",
         "color": "green",
@@ -78,7 +85,6 @@ def analizar_curva_matematica(signal, tipo_curva, fs=50):
         "consejo": "Correlacione con la clínica del paciente."
     }
     
-    # Detección de Picos
     prominencia = 0.15 
     distancia_min = int(0.15 * fs)
     picos, _ = find_peaks(signal, prominence=prominencia, distance=distancia_min)
@@ -86,7 +92,6 @@ def analizar_curva_matematica(signal, tipo_curva, fs=50):
     if len(picos) < 2:
         return hallazgos, picos
 
-    # Análisis de Pares
     for i in range(len(picos) - 1):
         p1 = picos[i]
         p2 = picos[i+1]
@@ -133,18 +138,15 @@ def main():
     # --- BARRA LATERAL ---
     st.sidebar.header("⚙️ Configuración")
     
-    # API KEY INPUT
     api_key = st.sidebar.text_input("🔑 Google Gemini API Key", type="password", help="Pega aquí tu API Key de Google AI Studio")
     if not api_key:
         st.sidebar.warning("Necesitas la API Key para usar la función de 'Segunda Opinión'.")
     
     st.sidebar.divider()
     st.sidebar.header("🎨 Calibración de Color")
-    st.sidebar.info("Ajusta si la curva no se detecta bien.")
-
+    
     tipo = st.radio("¿Qué curva estás analizando?", ["Presión (Paw)", "Flujo (Flow)"], horizontal=True)
 
-    # Sliders de calibración
     if "Presión" in tipo:
         def_h, def_s, def_v = (20, 40), (100, 255), (100, 255) 
     else:
@@ -160,7 +162,7 @@ def main():
     if imagen:
         bytes_data = imagen.getvalue()
         
-        # 1. PROCESAMIENTO MATEMÁTICO (Visualización)
+        # 1. PROCESAMIENTO MATEMÁTICO
         img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         h, w, _ = img.shape
@@ -172,7 +174,6 @@ def main():
         with st.expander("👁️ Debug: Visión por Computadora", expanded=False):
             st.image(mask, caption="Máscara Binaria", use_column_width=True)
 
-        # Extracción de señal
         raw_signal = []
         for col in range(int(w*0.1), int(w*0.9)):
             col_data = mask[:, col]
@@ -183,10 +184,9 @@ def main():
                 val = raw_signal[-1] if len(raw_signal) > 0 else 0
                 raw_signal.append(val)
         
-        # Si no hay señal, avisar pero permitir intentar con IA
         signal_valid = True
         if np.max(raw_signal) == 0:
-            st.warning("⚠️ El algoritmo geométrico no detectó la curva clara. Puedes intentar calibrar los colores o consultar directamente a la IA.")
+            st.warning("⚠️ El algoritmo geométrico no detectó la curva clara. Intenta calibrar los colores o usa directamente la IA.")
             signal_valid = False
 
         if signal_valid:
@@ -197,10 +197,8 @@ def main():
             except:
                 sig_smooth = sig_norm
 
-            # Análisis Matemático
             res_math, picos = analizar_curva_matematica(sig_smooth, tipo.split()[0])
 
-            # Mostrar Gráfico
             fig, ax = plt.subplots(figsize=(10, 3))
             fig.patch.set_facecolor('#0e1117')
             ax.set_facecolor('black')
@@ -209,28 +207,25 @@ def main():
             ax.plot(picos, sig_smooth[picos], "wo", markersize=5)
             ax.axis('off')
             st.pyplot(fig)
-            
             st.caption(f"📍 Diagnóstico Geométrico: {res_math['diagnostico']}")
 
-        # 2. CONSULTA A LA IA (EL EXPERTO)
+        # 2. CONSULTA A LA IA
         st.divider()
         st.subheader("🤖 Opinión del Experto (IA)")
         
         col_btn, col_info = st.columns([1, 2])
-        
         with col_info:
-            st.markdown("Si el gráfico de arriba no es claro o quieres una interpretación clínica detallada, consulta a la IA.")
+            st.markdown("Consulta a la IA para una interpretación detallada de la imagen original.")
 
         with col_btn:
-            # Botón para llamar a la API (para no gastar tokens automáticamente)
             consultar = st.button("🔍 Analizar con IA", type="primary")
 
         if consultar:
-            if not api_key:
-                st.error("🔒 Necesitas poner la API Key en la barra lateral.")
+            diagnostico_ia = consultar_intensivista_ia(bytes_data, tipo, api_key)
+            st.markdown("### 📝 Reporte Clínico:")
+            if "❌" in diagnostico_ia:
+                st.error(diagnostico_ia)
             else:
-                diagnostico_ia = consultar_intensivista_ia(bytes_data, tipo, api_key)
-                st.markdown("### 📝 Reporte Clínico:")
                 st.info(diagnostico_ia)
 
 if __name__ == "__main__":
