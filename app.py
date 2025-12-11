@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 1. LÓGICA DE INTELIGENCIA ARTIFICIAL
+# 1. LÓGICA DE INTELIGENCIA ARTIFICIAL (ROBUSTA)
 # ==========================================
 
 def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
@@ -42,26 +42,55 @@ def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
     4. Da una recomendación clínica concisa.
     """
 
-    # Intentamos SOLO con el modelo más estándar y disponible actualmente
-    # Gemini 1.5 Flash es el más rápido y gratuito.
-    modelo_nombre = "gemini-1.5-flash"
-
+    # --- PASO CRÍTICO: AUTODESCUBRIMIENTO DE MODELOS ---
     try:
-        model = genai.GenerativeModel(modelo_nombre)
-        with st.spinner(f'🤖 Consultando a {modelo_nombre}...'):
+        # Preguntamos a la API qué modelos tiene disponibles para esta Key
+        lista_modelos = list(genai.list_models())
+        
+        # Filtramos solo los que sirven para generar contenido (texto/visión)
+        modelos_validos = [m.name for m in lista_modelos if 'generateContent' in m.supported_generation_methods]
+        
+        # Prioridad de elección (preferimos el Flash o el Pro 1.5)
+        modelo_elegido = None
+        
+        # Buscamos en orden de preferencia
+        preferencias = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-1.5-pro",
+            "models/gemini-pro-vision", # Fallback antiguo pero seguro
+            "models/gemini-pro"
+        ]
+        
+        # Intentar coincidir con preferencias
+        for pref in preferencias:
+            if pref in modelos_validos:
+                modelo_elegido = pref
+                break
+        
+        # Si no está ninguno de los preferidos, tomamos el primero que haya (desesperación)
+        if not modelo_elegido and modelos_validos:
+            modelo_elegido = modelos_validos[0]
+            
+        if not modelo_elegido:
+            return f"❌ Tu API Key es válida, pero no tiene acceso a modelos de visión. Modelos detectados: {str(modelos_validos)}"
+
+        # --- GENERACIÓN ---
+        st.caption(f"🤖 Usando modelo detectado: `{modelo_elegido}`") # Feedback visual
+        model = genai.GenerativeModel(modelo_elegido)
+        
+        with st.spinner(f'Analizando con {modelo_elegido}...'):
             response = model.generate_content([prompt, image_pil])
             return response.text
-            
+
     except Exception as e:
-        return f"""❌ Error conectando con {modelo_nombre}.
+        return f"""❌ Error Crítico.
         
-        Detalle del error: {str(e)}
+        Detalle: {str(e)}
         
-        ---
-        🔍 DIAGNÓSTICO DE VERSIÓN:
-        Tu servidor está usando google-generativeai versión: {genai.__version__}
-        
-        Si la versión es menor a 0.7.0, necesitas borrar la app en Streamlit Cloud y volver a crearla para forzar la actualización.
+        Posibles causas:
+        1. La API Key no tiene permisos habilitados en Google AI Studio.
+        2. Restricción regional (algunos modelos no van en Europa/ciertos países).
         """
 
 # ==========================================
@@ -126,8 +155,7 @@ def main():
     st.title("🫁 Ventilator Lab: Híbrido")
     st.markdown("Detección de asincronías: **Visión Artificial + IA Generativa**")
     
-    # --- DEBUG INFO ---
-    st.caption(f"🔧 Versión de librería IA instalada: {genai.__version__}")
+    st.caption(f"🔧 Estado Librería: OK (v{genai.__version__})")
 
     # --- BARRA LATERAL ---
     st.sidebar.header("⚙️ Configuración")
