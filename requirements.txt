@@ -4,3 +4,4 @@ pandas
 scipy
 matplotlib
 opencv-python-headless
+google-generativeai
