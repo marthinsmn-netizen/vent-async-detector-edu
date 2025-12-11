@@ -21,25 +21,14 @@ st.set_page_config(
 )
 
 # ==========================================
-# 1. LÓGICA DE INTELIGENCIA ARTIFICIAL (GEMINI)
+# 1. LÓGICA DE INTELIGENCIA ARTIFICIAL
 # ==========================================
 
 def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
-    """
-    Intenta conectar con varios modelos de Gemini hasta encontrar uno disponible.
-    """
     if not api_key:
         return "⚠️ Por favor, introduce tu Google API Key en la barra lateral."
 
-    # Lista de modelos a probar (del más nuevo al más antiguo/estable)
-    modelos_a_probar = [
-        "gemini-1.5-flash",          # Opción 1: El más rápido y nuevo
-        "gemini-1.5-flash-latest",   # Opción 2: Alias de la última versión
-        "gemini-1.5-flash-001",      # Opción 3: Versión específica
-        "gemini-1.5-pro",            # Opción 4: Modelo más potente
-        "gemini-pro-vision"          # Opción 5: Modelo antiguo (Fallback seguro)
-    ]
-
+    # Configuración de la API
     genai.configure(api_key=api_key)
     image_pil = Image.open(io.BytesIO(image_bytes))
 
@@ -53,25 +42,27 @@ def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
     4. Da una recomendación clínica concisa.
     """
 
-    errores_acumulados = []
+    # Intentamos SOLO con el modelo más estándar y disponible actualmente
+    # Gemini 1.5 Flash es el más rápido y gratuito.
+    modelo_nombre = "gemini-1.5-flash"
 
-    for nombre_modelo in modelos_a_probar:
-        try:
-            # Intentamos configurar el modelo actual del bucle
-            model = genai.GenerativeModel(nombre_modelo)
+    try:
+        model = genai.GenerativeModel(modelo_nombre)
+        with st.spinner(f'🤖 Consultando a {modelo_nombre}...'):
+            response = model.generate_content([prompt, image_pil])
+            return response.text
             
-            with st.spinner(f'🤖 Consultando al experto (Intentando con {nombre_modelo})...'):
-                # Llamada a la API
-                response = model.generate_content([prompt, image_pil])
-                return response.text # ¡Éxito! Retornamos la respuesta y salimos
-                
-        except Exception as e:
-            # Si falla, guardamos el error y el bucle continuará con el siguiente modelo
-            errores_acumulados.append(f"{nombre_modelo}: {str(e)}")
-            time.sleep(1) # Pequeña pausa antes de reintentar
-
-    # Si llegamos aquí, fallaron todos los modelos
-    return f"❌ No se pudo conectar con ningún modelo de IA.\n\nDetalles técnicos:\n" + "\n".join(errores_acumulados)
+    except Exception as e:
+        return f"""❌ Error conectando con {modelo_nombre}.
+        
+        Detalle del error: {str(e)}
+        
+        ---
+        🔍 DIAGNÓSTICO DE VERSIÓN:
+        Tu servidor está usando google-generativeai versión: {genai.__version__}
+        
+        Si la versión es menor a 0.7.0, necesitas borrar la app en Streamlit Cloud y volver a crearla para forzar la actualización.
+        """
 
 # ==========================================
 # 2. LÓGICA MATEMÁTICA (OPENCV)
@@ -134,13 +125,16 @@ def analizar_curva_matematica(signal, tipo_curva, fs=50):
 def main():
     st.title("🫁 Ventilator Lab: Híbrido")
     st.markdown("Detección de asincronías: **Visión Artificial + IA Generativa**")
+    
+    # --- DEBUG INFO ---
+    st.caption(f"🔧 Versión de librería IA instalada: {genai.__version__}")
 
     # --- BARRA LATERAL ---
     st.sidebar.header("⚙️ Configuración")
     
-    api_key = st.sidebar.text_input("🔑 Google Gemini API Key", type="password", help="Pega aquí tu API Key de Google AI Studio")
+    api_key = st.sidebar.text_input("🔑 Google Gemini API Key", type="password")
     if not api_key:
-        st.sidebar.warning("Necesitas la API Key para usar la función de 'Segunda Opinión'.")
+        st.sidebar.warning("Necesitas la API Key.")
     
     st.sidebar.divider()
     st.sidebar.header("🎨 Calibración de Color")
@@ -186,7 +180,7 @@ def main():
         
         signal_valid = True
         if np.max(raw_signal) == 0:
-            st.warning("⚠️ El algoritmo geométrico no detectó la curva clara. Intenta calibrar los colores o usa directamente la IA.")
+            st.warning("⚠️ El algoritmo geométrico no detectó la curva clara. Intenta calibrar colores.")
             signal_valid = False
 
         if signal_valid:
@@ -211,21 +205,18 @@ def main():
 
         # 2. CONSULTA A LA IA
         st.divider()
-        st.subheader("🤖 Opinión del Experto (IA)")
-        
         col_btn, col_info = st.columns([1, 2])
         with col_info:
-            st.markdown("Consulta a la IA para una interpretación detallada de la imagen original.")
-
+            st.markdown("**IA Experta:**")
         with col_btn:
             consultar = st.button("🔍 Analizar con IA", type="primary")
 
         if consultar:
             diagnostico_ia = consultar_intensivista_ia(bytes_data, tipo, api_key)
-            st.markdown("### 📝 Reporte Clínico:")
             if "❌" in diagnostico_ia:
                 st.error(diagnostico_ia)
             else:
+                st.success("Reporte generado:")
                 st.info(diagnostico_ia)
 
 if __name__ == "__main__":
