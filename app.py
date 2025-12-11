@@ -31,9 +31,11 @@ def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
         return "⚠️ Por favor, introduce tu Google API Key en la barra lateral para usar la IA."
 
     try:
-        # Configurar API
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+       # Busca esta línea:
+# model = genai.GenerativeModel('gemini-1.5-flash')
+
+# Y CÁMBIALA POR ESTA (que fuerza la versión más reciente disponible):
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
         # Convertir bytes a imagen PIL
         image_pil = Image.open(io.BytesIO(image_bytes))
