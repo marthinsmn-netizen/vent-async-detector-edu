@@ -8,7 +8,7 @@ from PIL import Image
 import io
 import google.generativeai as genai
 
-# Usar backend no interactivo
+# Usar backend no interactivo para evitar errores de hilos en Streamlit Cloud
 matplotlib.use('Agg')
 
 # --- Configuración Estética ---
@@ -25,22 +25,22 @@ st.set_page_config(
 
 def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
     """
-    Envía la imagen a Google Gemini 1.5 Flash actuando como médico experto.
+    Envía la imagen a Google Gemini actuando como médico experto.
     """
     if not api_key:
         return "⚠️ Por favor, introduce tu Google API Key en la barra lateral para usar la IA."
 
     try:
-       # Busca esta línea:
-# model = genai.GenerativeModel('gemini-1.5-flash')
-
-# Y CÁMBIALA POR ESTA (que fuerza la versión más reciente disponible):
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # Configurar API
+        genai.configure(api_key=api_key)
+        
+        # CAMBIO IMPORTANTE: Usamos 'gemini-1.5-flash-latest' para evitar errores de versión
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
         # Convertir bytes a imagen PIL
         image_pil = Image.open(io.BytesIO(image_bytes))
 
-        # El Prompt (El ROL que me pediste)
+        # El Prompt (El ROL de experto)
         prompt = f"""
         Actúa como un Médico Intensivista experto en Ventilación Mecánica y análisis de asincronías.
         Analiza esta imagen de la pantalla de un ventilador mecánico.
@@ -61,7 +61,7 @@ model = genai.GenerativeModel('gemini-1.5-flash-latest')
             return response.text
 
     except Exception as e:
-        return f"❌ Error de conexión con la IA: {str(e)}"
+        return f"❌ Error de conexión con la IA: {str(e)}\n\n(Prueba actualizando 'requirements.txt' a 'google-generativeai>=0.7.2')"
 
 # ==========================================
 # 2. LÓGICA MATEMÁTICA (OPENCV)
@@ -134,7 +134,7 @@ def main():
     st.sidebar.header("⚙️ Configuración")
     
     # API KEY INPUT
-    api_key = st.sidebar.text_input("🔑 Google Gemini API Key", type="password", help="AIzaSyBoQ6MTvu8i725FI8rHB19qRNJGLHP0NtM")
+    api_key = st.sidebar.text_input("🔑 Google Gemini API Key", type="password", help="Pega aquí tu API Key de Google AI Studio")
     if not api_key:
         st.sidebar.warning("Necesitas la API Key para usar la función de 'Segunda Opinión'.")
     
