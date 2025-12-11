@@ -1,7 +1,7 @@
 streamlit
 numpy
-pandas
-scipy
 matplotlib
+scipy
 opencv-python-headless
-google-generativeai
+google-generativeai  <-- NUEVO
+pillow               <-- NUEVO
