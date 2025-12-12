@@ -19,6 +19,7 @@ from PIL import Image
 import io
 import google.generativeai as genai
 import time
+import os  # <--- NUEVO: Para verificar si existe el logo
 
 # Configuración de Matplotlib para servidores sin pantalla
 matplotlib.use('Agg')
@@ -36,7 +37,6 @@ st.set_page_config(
 # ==========================================
 TEXTOS = {
     "es": {
-        # --- UI TEXTS (Mantenemos igual) ---
         "title": "🫁 Ventilator Lab: Híbrido",
         "subtitle": "Diagnóstico de Asincronías: **Visión Artificial + IA Generativa**",
         "sidebar_settings": "⚙️ Configuración",
@@ -80,8 +80,6 @@ TEXTOS = {
         "adv_double_trigger": "Evalúe Ti neural vs Ti mecánico.",
         "diag_auto_cycle": "Posible Doble Disparo/Autociclado",
         "loading_ai": "🤖 El Experto está analizando la morfología...",
-        
-        # --- SUPER PROMPT CLÍNICO (ESPAÑOL) ---
         "prompt_system": """
         Actúa como un Auditor Clínico Senior especialista en Ventilación Mecánica y Análisis Gráfico.
         Tu objetivo es identificar asincronías complejas con precisión quirúrgica, minimizando falsos positivos.
@@ -94,7 +92,7 @@ TEXTOS = {
         1. ¿La imagen muestra claramente una pantalla de ventilador? Si es ilegible, detente y responde "Imagen no diagnóstica".
         2. El usuario indica que es una curva de: **{tipo_curva}**.
            - Verifica visualmente: 
-             * Si es PRESIÓN: Debe ser siempre positiva (sobre la línea base). Forma cuadrada (PCV) o triangular (VCV).
+             * Si es PRESIÓN: Debe ser siempre positiva (sobre la línea base). Forma cuadrada o constante (PCV) o triangular y descendente (VCV).
              * Si es FLUJO: Debe tener fase positiva (inspiración) y negativa (espiración), cruzando el cero.
            - Si la imagen NO coincide con el tipo indicado, adviértelo primero.
 
@@ -105,7 +103,7 @@ TEXTOS = {
            - Definición Visual: Dos ciclos inspiratorios consecutivos separados por un tiempo muy breve (< 1 seg), sin retorno a la línea base o con exhalación incompleta entre ellos.
            - Contexto: Común en Flujo y Presión.
 
-        B. HAMBRE DE FLUJO (Flow Starvation) - *Solo evaluar si es curva de PRESIÓN*:
+        B. FLUJO INSUFICIENTE (Flow Starvation) - *Solo evaluar si es curva de PRESIÓN*:
            - Definición Visual: Busca una "muesca", "concavidad" o deformación hacia abajo en la rama inspiratoria (la presión cae o se aplana cuando debería subir). La curva parece una "cuchara" o letra M deformada.
            - NO confundir con el descenso inicial de presión en modos disparados por presión.
 
@@ -127,7 +125,6 @@ TEXTOS = {
     },
     
     "en": {
-        # --- UI TEXTS (English) ---
         "title": "🫁 Ventilator Lab: Hybrid",
         "subtitle": "Asynchrony Detection: **Computer Vision + Generative AI**",
         "sidebar_settings": "⚙️ Settings",
@@ -171,8 +168,6 @@ TEXTOS = {
         "adv_double_trigger": "Evaluate Neural Ti vs Mechanical Ti.",
         "diag_auto_cycle": "Possible Double Trigger/Auto-cycling",
         "loading_ai": "🤖 Expert is analyzing morphology...",
-        
-        # --- SUPER CLINICAL PROMPT (ENGLISH) ---
         "prompt_system": """
         Act as a Senior Clinical Auditor specializing in Mechanical Ventilation and Waveform Analysis.
         Your goal is to identify complex asynchronies with surgical precision, minimizing false positives.
@@ -215,6 +210,7 @@ TEXTOS = {
         """
     }
 }
+
 # ==========================================
 # 1. LÓGICA DE IA (ROBUSTA + MULTILINGÜE)
 # ==========================================
@@ -332,6 +328,12 @@ def analizar_curva_matematica(signal, tipo_curva_key, fs=50, lang_code="es"):
 
 def main():
     # --- BARRA LATERAL (CONFIGURACIÓN) ---
+    
+    # 1. MOSTRAR LOGO SI EXISTE
+    # Busca 'logo.png' en la raíz. Si no está, no pasa nada.
+    if os.path.exists("logo.png"):
+        st.sidebar.image("logo.png", use_column_width=True)
+    
     st.sidebar.header("🌐 Language / Idioma")
     idioma_selec = st.sidebar.radio("Select:", ["Español", "English"], horizontal=True)
     
@@ -344,7 +346,7 @@ def main():
     st.sidebar.divider()
     st.sidebar.header(t["sidebar_settings"])
     
-    # 1. GESTIÓN DE API KEY
+    # 2. GESTIÓN DE API KEY
     api_key = None
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
@@ -356,11 +358,11 @@ def main():
 
     st.sidebar.divider()
     
-    # 2. CALIBRACIÓN
+    # 3. CALIBRACIÓN
     st.sidebar.header(t["color_calib"])
     st.sidebar.info(t["color_info"])
     
-    # 3. SELECCIÓN DE CURVA
+    # 4. SELECCIÓN DE CURVA
     st.subheader(t["curve_type"])
 
     with st.expander(t["help_title"]):
