@@ -36,6 +36,7 @@ st.set_page_config(
 # ==========================================
 TEXTOS = {
     "es": {
+        # --- UI TEXTS (Mantenemos igual) ---
         "title": "🫁 Ventilator Lab: Híbrido",
         "subtitle": "Diagnóstico de Asincronías: **Visión Artificial + IA Generativa**",
         "sidebar_settings": "⚙️ Configuración",
@@ -78,42 +79,55 @@ TEXTOS = {
         "desc_double_trigger": "Valle profundo entre ciclos rápidos.",
         "adv_double_trigger": "Evalúe Ti neural vs Ti mecánico.",
         "diag_auto_cycle": "Posible Doble Disparo/Autociclado",
-        "loading_ai": "🤖 Analizando imagen (Evaluando morfología)...",
+        "loading_ai": "🤖 El Experto está analizando la morfología...",
         
-        # --- PROMPT CLÍNICO EN ESPAÑOL ---
+        # --- SUPER PROMPT CLÍNICO (ESPAÑOL) ---
         "prompt_system": """
-        Actúa como un Experto Mundial en Ventilación Mecánica y Análisis de Formas de Onda (Waveform Analysis).
-        Tu tarea es detectar asincronías Paciente-Ventilador con alta precisión, evitando falsos positivos.
+        Actúa como un Auditor Clínico Senior especialista en Ventilación Mecánica y Análisis Gráfico.
+        Tu objetivo es identificar asincronías complejas con precisión quirúrgica, minimizando falsos positivos.
         Responde SIEMPRE en ESPAÑOL.
         """,
         "prompt_instructions": """
-        Analiza la imagen adjunta siguiendo estrictamente este protocolo de pensamiento:
+        Analiza la imagen adjunta siguiendo estrictamente este PROTOCOLO DE RAZONAMIENTO CLÍNICO:
 
-        1. **Validación de Imagen:** ¿Es una curva de ventilador legible? Si es ruido o no es una pantalla, responde "Imagen no válida".
+        --- PASO 1: CONTROL DE CALIDAD Y TIPO ---
+        1. ¿La imagen muestra claramente una pantalla de ventilador? Si es ilegible, detente y responde "Imagen no diagnóstica".
+        2. El usuario indica que es una curva de: **{tipo_curva}**.
+           - Verifica visualmente: 
+             * Si es PRESIÓN: Debe ser siempre positiva (sobre la línea base). Forma cuadrada (PCV) o triangular (VCV).
+             * Si es FLUJO: Debe tener fase positiva (inspiración) y negativa (espiración), cruzando el cero.
+           - Si la imagen NO coincide con el tipo indicado, adviértelo primero.
+
+        --- PASO 2: ESCANEO DE ASINCRONÍAS (BÚSQUEDA DIRIGIDA) ---
+        Busca **exclusivamente** patrones que coincidan con estas definiciones morfológicas:
+
+        A. DOBLE DISPARO (Double Trigger):
+           - Definición Visual: Dos ciclos inspiratorios consecutivos separados por un tiempo muy breve (< 1 seg), sin retorno a la línea base o con exhalación incompleta entre ellos.
+           - Contexto: Común en Flujo y Presión.
+
+        B. HAMBRE DE FLUJO (Flow Starvation) - *Solo evaluar si es curva de PRESIÓN*:
+           - Definición Visual: Busca una "muesca", "concavidad" o deformación hacia abajo en la rama inspiratoria (la presión cae o se aplana cuando debería subir). La curva parece una "cuchara" o letra M deformada.
+           - NO confundir con el descenso inicial de presión en modos disparados por presión.
+
+        C. CICLADO PREMATURO (Early Cycling) - *Solo evaluar si es curva de FLUJO*:
+           - Definición Visual: El flujo inspiratorio cae a cero abruptamente. Inmediatamente después, en la fase espiratoria (negativa), aparece una pequeña deflexión/pico hacia la línea base (como si el paciente intentara seguir tomando aire) antes de completar la exhalación.
         
-        2. **Identificación de Curva:** El usuario dice que es una curva de: {tipo_curva}. Verifica visualmente si coincide.
-           - Presión (Paw): Generalmente positiva, forma cuadrada/rampa.
-           - Flujo (Flow): Cruza la línea base (positivo insp, negativo esp).
+        D. ESFUERZOS INEFECTIVOS (Ineffective Efforts) - *Solo evaluar si es curva de FLUJO*:
+           - Definición Visual: Durante la fase espiratoria (parte negativa), se observan pequeñas "montañitas" o deflexiones positivas que se acercan a la línea cero pero NO logran disparar un nuevo ciclo.
 
-        3. **Búsqueda de Asincronías (Criterios Estrictos):**
-           - **Doble Disparo (Double Trigger):** Busca DOS ciclos inspiratorios consecutivos separados por un tiempo muy corto (<1s), donde la espiración del primero es incompleta.
-           - **Hambre de Flujo (Flow Starvation):** SOLO en curvas de PRESIÓN. Busca una "muesca" o concavidad significativa en la rama inspiratoria (la presión cae cuando debería subir o mantenerse).
-           - **Ciclado Retrasado (Delayed Cycling):** SOLO en curvas de PRESIÓN (Modo Soporte). Busca un pico de presión al final de la inspiración.
-           - **Esfuerzos Inefectivos (Ineffective Efforts):** SOLO en curvas de FLUJO. Busca pequeñas deflexiones positivas durante la fase espiratoria que no logran disparar un nuevo ciclo.
-           - **Ciclado prematuro (Early cycle):** SOLO en curvas de FLUJO. Busca pequeñas deflexiones positivas durante la fase espiratoria, muy proximas a la inspiración que no logran disparar un nuevo ciclo, y ausencia del pico negativo de flujo.
+        --- PASO 3: DICTAMEN FINAL ---
+        - Sé conservador. Si la curva se ve limpia y sincrónica, diagnostica "Patrón Sincrónico / Normal".
+        - Si detectas una asincronía, justifica tu respuesta describiendo la forma visual (ej: "Se observa concavidad en el tercio medio...").
 
-        4. **Conclusión:**
-           - Si la curva se ve normal y limpia, di "Trazo Normo-funcional". No inventes problemas.
-           - Si encuentras algo, describe la morfología (ej: "Se observa concavidad en el tercio medio de la inspiración").
-           - Da una recomendación clínica breve (ej: "Aumentar Flow / Ajustar Rise Time").
-
-        FORMATO DE RESPUESTA:
-        **Diagnóstico:** [Nombre de la asincronía o "Normal"]
-        **Hallazgo Visual:** [Descripción técnica breve de lo que ves]
-        **Acción Sugerida:** [Ajuste del ventilador recomendado]
+        FORMATO DE SALIDA (Usa Markdown):
+        ### 🏥 Diagnóstico: [NOMBRE DE LA ASINCRONÍA o "TRAZO NORMAL"]
+        **🔎 Hallazgo Visual:** [Descripción técnica de la morfología detectada]
+        **💡 Acción Clínica:** [Recomendación breve para corregirlo]
         """
     },
+    
     "en": {
+        # --- UI TEXTS (English) ---
         "title": "🫁 Ventilator Lab: Hybrid",
         "subtitle": "Asynchrony Detection: **Computer Vision + Generative AI**",
         "sidebar_settings": "⚙️ Settings",
@@ -156,43 +170,51 @@ TEXTOS = {
         "desc_double_trigger": "Deep valley between fast cycles.",
         "adv_double_trigger": "Evaluate Neural Ti vs Mechanical Ti.",
         "diag_auto_cycle": "Possible Double Trigger/Auto-cycling",
-        "loading_ai": "🤖 Analyzing image (Evaluating morphology)...",
+        "loading_ai": "🤖 Expert is analyzing morphology...",
         
-        # --- PROMPT CLÍNICO EN INGLÉS ---
+        # --- SUPER CLINICAL PROMPT (ENGLISH) ---
         "prompt_system": """
-        Act as a World-Class Expert in Mechanical Ventilation and Waveform Analysis.
-        Your task is to detect Patient-Ventilator asynchronies with high precision, avoiding false positives.
+        Act as a Senior Clinical Auditor specializing in Mechanical Ventilation and Waveform Analysis.
+        Your goal is to identify complex asynchronies with surgical precision, minimizing false positives.
         Respond ALWAYS in ENGLISH.
         """,
         "prompt_instructions": """
-        Analyze the attached image following this strict thinking protocol:
+        Analyze the attached image following this strict CLINICAL REASONING PROTOCOL:
 
-        1. **Image Validation:** Is this a legible ventilator waveform? If it's noise or not a screen, reply "Invalid Image".
+        --- STEP 1: QUALITY & TYPE CHECK ---
+        1. Does the image clearly show a ventilator screen? If unreadable, stop and reply "Non-diagnostic image".
+        2. The user states this is a: **{tipo_curva}** curve.
+           - Visually verify: 
+             * If PRESSURE: Must be always positive (above baseline). Square (PCV) or Triangular (VCV) shape.
+             * If FLOW: Must have positive (insp) and negative (exp) phases, crossing zero.
+           - If the image DOES NOT match the type, warn the user first.
+
+        --- STEP 2: ASYNCHRONY SCAN (TARGETED SEARCH) ---
+        Look **exclusively** for patterns matching these morphological definitions:
+
+        A. DOUBLE TRIGGER:
+           - Visual Definition: Two consecutive inspiratory cycles separated by a very brief time (< 1 sec), without return to baseline or with incomplete exhalation between them.
+
+        B. FLOW STARVATION - *Evaluate only if PRESSURE curve*:
+           - Visual Definition: Look for a "notch", "scooping", or concavity in the inspiratory limb (pressure drops or flattens when it should rise). The curve looks like a "spoon" or deformed M.
+
+        C. EARLY CYCLING - *Evaluate only if FLOW curve*:
+           - Visual Definition: Inspiratory flow drops to zero abruptly. Immediately after, in the expiratory phase (negative), a small deflection/spike appears towards the baseline (as if the patient tried to continue inhaling) before completing exhalation.
         
-        2. **Curve Identification:** The user states this is a: {tipo_curva} curve. Visually verify if this matches.
-           - Pressure (Paw): Generally positive, square/ramp shape.
-           - Flow: Crosses baseline (positive insp, negative exp).
+        D. INEFFECTIVE EFFORTS - *Evaluate only if FLOW curve*:
+           - Visual Definition: During the expiratory phase (negative part), small "mounds" or positive deflections are observed approaching the zero line but NOT triggering a new cycle.
 
-        3. **Asynchrony Search (Strict Criteria):**
-           - **Double Trigger:** Look for TWO consecutive inspiratory cycles separated by a very short time (<1s), with incomplete exhalation of the first.
-           - **Flow Starvation:** ONLY in PRESSURE curves. Look for a "scooping" or significant concavity in the inspiratory limb (pressure drops when it should rise or plateau).
-           - **Delayed Cycling:** ONLY in PRESSURE curves (Support Mode). Look for a pressure spike at the very end of inspiration.
-           - **Ineffective Efforts:** ONLY in FLOW curves. Look for small positive deflections during the expiratory phase that fail to trigger a new cycle.
-           - **Early Cycling:** ONLY in FLOW curves. Look for small positive deflections during the expiratory phase, very close to inspiration, that fail to trigger a new cycle, and absence of the negative flow peak.
+        --- STEP 3: FINAL VERDICT ---
+        - Be conservative. If the curve looks clean and synchronous, diagnose "Synchronous / Normal Pattern".
+        - If an asynchrony is detected, justify your answer by describing the visual shape (e.g., "Concavity observed in the middle third...").
 
-        4. **Conclusion:**
-           - If the curve looks normal and clean, say "Normal Functional Trace". Do not invent problems.
-           - If you find something, describe the morphology (e.g., "Concavity observed in mid-inspiration").
-           - Provide a brief clinical recommendation (e.g., "Increase Flow / Adjust Rise Time").
-
-        RESPONSE FORMAT:
-        **Diagnosis:** [Asynchrony Name or "Normal"]
-        **Visual Finding:** [Brief technical description]
-        **Suggested Action:** [Ventilator adjustment]
+        OUTPUT FORMAT (Use Markdown):
+        ### 🏥 Diagnosis: [ASYNCHRONY NAME or "NORMAL TRACE"]
+        **🔎 Visual Finding:** [Technical description of morphology detected]
+        **💡 Clinical Action:** [Brief recommendation to fix it]
         """
     }
 }
-
 # ==========================================
 # 1. LÓGICA DE IA (ROBUSTA + MULTILINGÜE)
 # ==========================================
