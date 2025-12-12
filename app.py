@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 0. DICCIONARIO DE IDIOMAS (ACTUALIZADO)
+# 0. DICCIONARIO DE IDIOMAS & PROMPTS ROBUSTOS
 # ==========================================
 TEXTOS = {
     "es": {
@@ -37,15 +37,11 @@ TEXTOS = {
         "color_calib": "🎨 Calibración de Color",
         "color_info": "Ajusta si la curva no se detecta.",
         "curve_type": "¿Qué curva vas a analizar?",
-        
-        # --- NUEVA SECCIÓN DE AYUDA ---
         "help_title": "❓ ¿Cómo saber cuál elegir?",
         "help_p_name": "Gráfica de PRESIÓN (Paw)",
         "help_p_desc": "🟢 **Forma:** Sube y baja, pero **siempre se mantiene por encima de la línea base** (nunca cruza a negativo). Suele ser cuadrada o triangular.",
         "help_f_name": "Gráfica de FLUJO (Flow)",
         "help_f_desc": "🔵 **Forma:** Tiene una montaña hacia arriba (aire entrando) y una hacia abajo (aire saliendo). **Cruza la línea del cero.**",
-        # -----------------------------
-
         "opt_pressure": "Presión (Paw)",
         "opt_flow": "Flujo (Flow)",
         "sliders_hue": "Matiz (H)",
@@ -71,9 +67,40 @@ TEXTOS = {
         "desc_double_trigger": "Valle profundo entre ciclos rápidos.",
         "adv_double_trigger": "Evalúe Ti neural vs Ti mecánico.",
         "diag_auto_cycle": "Posible Doble Disparo/Autociclado",
-        "loading_ai": "🤖 Analizando imagen...",
-        "prompt_role": "Actúa como un Médico Intensivista experto en Ventilación Mecánica. Responde SIEMPRE en ESPAÑOL.",
-        "prompt_task": "Analiza esta imagen de pantalla de ventilador. Busca asincronías (Doble Disparo, Hambre de Flujo, etc). Da diagnóstico y recomendación."
+        "loading_ai": "🤖 Analizando imagen (Evaluando morfología)...",
+        
+        # --- PROMPT CLÍNICO EN ESPAÑOL ---
+        "prompt_system": """
+        Actúa como un Experto Mundial en Ventilación Mecánica y Análisis de Formas de Onda (Waveform Analysis).
+        Tu tarea es detectar asincronías Paciente-Ventilador con alta precisión, evitando falsos positivos.
+        Responde SIEMPRE en ESPAÑOL.
+        """,
+        "prompt_instructions": """
+        Analiza la imagen adjunta siguiendo estrictamente este protocolo de pensamiento:
+
+        1. **Validación de Imagen:** ¿Es una curva de ventilador legible? Si es ruido o no es una pantalla, responde "Imagen no válida".
+        
+        2. **Identificación de Curva:** El usuario dice que es una curva de: {tipo_curva}. Verifica visualmente si coincide.
+           - Presión (Paw): Generalmente positiva, forma cuadrada/rampa.
+           - Flujo (Flow): Cruza la línea base (positivo insp, negativo esp).
+
+        3. **Búsqueda de Asincronías (Criterios Estrictos):**
+           - **Doble Disparo (Double Trigger):** Busca DOS ciclos inspiratorios consecutivos separados por un tiempo muy corto (<1s), donde la espiración del primero es incompleta.
+           - **Hambre de Flujo (Flow Starvation):** SOLO en curvas de PRESIÓN. Busca una "muesca" o concavidad significativa en la rama inspiratoria (la presión cae cuando debería subir o mantenerse).
+           - **Ciclado Retrasado (Delayed Cycling):** SOLO en curvas de PRESIÓN (Modo Soporte). Busca un pico de presión al final de la inspiración.
+           - **Esfuerzos Inefectivos (Ineffective Efforts):** SOLO en curvas de FLUJO. Busca pequeñas deflexiones positivas durante la fase espiratoria que no logran disparar un nuevo ciclo.
+           - **Ciclado prematuro (Early cycle):** SOLO en curvas de FLUJO. Busca pequeñas deflexiones positivas durante la fase espiratoria, muy proximas a la inspiración que no logran disparar un nuevo ciclo, y ausencia del pico negativo de flujo.
+
+        4. **Conclusión:**
+           - Si la curva se ve normal y limpia, di "Trazo Normo-funcional". No inventes problemas.
+           - Si encuentras algo, describe la morfología (ej: "Se observa concavidad en el tercio medio de la inspiración").
+           - Da una recomendación clínica breve (ej: "Aumentar Flow / Ajustar Rise Time").
+
+        FORMATO DE RESPUESTA:
+        **Diagnóstico:** [Nombre de la asincronía o "Normal"]
+        **Hallazgo Visual:** [Descripción técnica breve de lo que ves]
+        **Acción Sugerida:** [Ajuste del ventilador recomendado]
+        """
     },
     "en": {
         "title": "🫁 Ventilator Lab: Hybrid",
@@ -88,15 +115,11 @@ TEXTOS = {
         "color_calib": "🎨 Color Calibration",
         "color_info": "Adjust if the curve is not detected.",
         "curve_type": "Which curve are you analyzing?",
-
-        # --- NEW HELP SECTION ---
         "help_title": "❓ How to identify the curve?",
         "help_p_name": "PRESSURE Graph (Paw)",
         "help_p_desc": "🟢 **Shape:** Goes up and down but **stays above the baseline** (never goes negative). Usually square or triangular.",
         "help_f_name": "FLOW Graph (Flow)",
         "help_f_desc": "🔵 **Shape:** Has a wave going Up (Inspiration) and Down (Expiration). **It crosses the zero line.**",
-        # ------------------------
-
         "opt_pressure": "Pressure (Paw)",
         "opt_flow": "Flow",
         "sliders_hue": "Hue (H)",
@@ -122,9 +145,40 @@ TEXTOS = {
         "desc_double_trigger": "Deep valley between fast cycles.",
         "adv_double_trigger": "Evaluate Neural Ti vs Mechanical Ti.",
         "diag_auto_cycle": "Possible Double Trigger/Auto-cycling",
-        "loading_ai": "🤖 Analyzing image...",
-        "prompt_role": "Act as an Expert Intensivist in Mechanical Ventilation. Respond ALWAYS in ENGLISH.",
-        "prompt_task": "Analyze this ventilator screen image. Look for asynchronies (Double Trigger, Flow Starvation, etc). Provide diagnosis and recommendation."
+        "loading_ai": "🤖 Analyzing image (Evaluating morphology)...",
+        
+        # --- PROMPT CLÍNICO EN INGLÉS ---
+        "prompt_system": """
+        Act as a World-Class Expert in Mechanical Ventilation and Waveform Analysis.
+        Your task is to detect Patient-Ventilator asynchronies with high precision, avoiding false positives.
+        Respond ALWAYS in ENGLISH.
+        """,
+        "prompt_instructions": """
+        Analyze the attached image following this strict thinking protocol:
+
+        1. **Image Validation:** Is this a legible ventilator waveform? If it's noise or not a screen, reply "Invalid Image".
+        
+        2. **Curve Identification:** The user states this is a: {tipo_curva} curve. Visually verify if this matches.
+           - Pressure (Paw): Generally positive, square/ramp shape.
+           - Flow: Crosses baseline (positive insp, negative exp).
+
+        3. **Asynchrony Search (Strict Criteria):**
+           - **Double Trigger:** Look for TWO consecutive inspiratory cycles separated by a very short time (<1s), with incomplete exhalation of the first.
+           - **Flow Starvation:** ONLY in PRESSURE curves. Look for a "scooping" or significant concavity in the inspiratory limb (pressure drops when it should rise or plateau).
+           - **Delayed Cycling:** ONLY in PRESSURE curves (Support Mode). Look for a pressure spike at the very end of inspiration.
+           - **Ineffective Efforts:** ONLY in FLOW curves. Look for small positive deflections during the expiratory phase that fail to trigger a new cycle.
+           - **Early Cycling:** ONLY in FLOW curves. Look for small positive deflections during the expiratory phase, very close to inspiration, that fail to trigger a new cycle, and absence of the negative flow peak.
+
+        4. **Conclusion:**
+           - If the curve looks normal and clean, say "Normal Functional Trace". Do not invent problems.
+           - If you find something, describe the morphology (e.g., "Concavity observed in mid-inspiration").
+           - Provide a brief clinical recommendation (e.g., "Increase Flow / Adjust Rise Time").
+
+        RESPONSE FORMAT:
+        **Diagnosis:** [Asynchrony Name or "Normal"]
+        **Visual Finding:** [Brief technical description]
+        **Suggested Action:** [Ventilator adjustment]
+        """
     }
 }
 
@@ -141,12 +195,14 @@ def consultar_intensivista_ia(image_bytes, tipo_curva, api_key, lang_code):
     genai.configure(api_key=api_key)
     image_pil = Image.open(io.BytesIO(image_bytes))
 
-    prompt = f"""
-    {t['prompt_role']}
-    Context: {t['curve_type']} {tipo_curva}
+    # Construcción del Prompt con Variables
+    instrucciones = t['prompt_instructions'].format(tipo_curva=tipo_curva)
     
-    Task:
-    {t['prompt_task']}
+    prompt_completo = f"""
+    {t['prompt_system']}
+    
+    INPUT DATA:
+    {instrucciones}
     """
 
     try:
@@ -175,7 +231,7 @@ def consultar_intensivista_ia(image_bytes, tipo_curva, api_key, lang_code):
 
         model = genai.GenerativeModel(modelo_elegido)
         with st.spinner(t['loading_ai']):
-            response = model.generate_content([prompt, image_pil])
+            response = model.generate_content([prompt_completo, image_pil])
             return response.text
 
     except Exception as e:
@@ -271,14 +327,12 @@ def main():
     st.sidebar.header(t["color_calib"])
     st.sidebar.info(t["color_info"])
     
-    # 3. SELECCIÓN DE CURVA CON GUÍA
+    # 3. SELECCIÓN DE CURVA
     st.subheader(t["curve_type"])
 
-    # --- NUEVA FUNCIÓN: GUÍA VISUAL ---
     with st.expander(t["help_title"]):
         st.info(f"{t['help_p_name']}\n\n{t['help_p_desc']}")
         st.info(f"{t['help_f_name']}\n\n{t['help_f_desc']}")
-    # ----------------------------------
 
     opcion_curva = st.radio(" ", [t["opt_pressure"], t["opt_flow"]], horizontal=True, label_visibility="collapsed")
     
