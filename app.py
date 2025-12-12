@@ -14,49 +14,145 @@ matplotlib.use('Agg')
 
 # --- Configuración de la Página ---
 st.set_page_config(
-    page_title="Asistente Ventilación AI",
+    page_title="Ventilator Lab AI",
     page_icon="🫁",
     layout="centered",
     initial_sidebar_state="expanded"
 )
 
 # ==========================================
-# 1. LÓGICA DE IA (ROBUSTA + AUTODESCUBRIMIENTO)
+# 0. DICCIONARIO DE IDIOMAS (ACTUALIZADO)
+# ==========================================
+TEXTOS = {
+    "es": {
+        "title": "🫁 Ventilator Lab: Híbrido",
+        "subtitle": "Diagnóstico de Asincronías: **Visión Artificial + IA Generativa**",
+        "sidebar_settings": "⚙️ Configuración",
+        "lang_select": "Idioma / Language",
+        "api_key_label": "🔑 Google API Key",
+        "api_key_help": "Introduce tu clave si no tienes licencia configurada.",
+        "api_warning": "Se requiere API Key para la IA.",
+        "license_ok": "✅ Licencia Pro Activada",
+        "api_missing": "⚠️ Falta la API Key. Configúrala en los 'Secrets' o en la barra lateral.",
+        "color_calib": "🎨 Calibración de Color",
+        "color_info": "Ajusta si la curva no se detecta.",
+        "curve_type": "¿Qué curva vas a analizar?",
+        
+        # --- NUEVA SECCIÓN DE AYUDA ---
+        "help_title": "❓ ¿Cómo saber cuál elegir?",
+        "help_p_name": "Gráfica de PRESIÓN (Paw)",
+        "help_p_desc": "🟢 **Forma:** Sube y baja, pero **siempre se mantiene por encima de la línea base** (nunca cruza a negativo). Suele ser cuadrada o triangular.",
+        "help_f_name": "Gráfica de FLUJO (Flow)",
+        "help_f_desc": "🔵 **Forma:** Tiene una montaña hacia arriba (aire entrando) y una hacia abajo (aire saliendo). **Cruza la línea del cero.**",
+        # -----------------------------
+
+        "opt_pressure": "Presión (Paw)",
+        "opt_flow": "Flujo (Flow)",
+        "sliders_hue": "Matiz (H)",
+        "sliders_sat": "Saturación (S)",
+        "sliders_val": "Brillo (V)",
+        "camera_label": "📸 Toma una foto a la pantalla",
+        "debug_view": "👁️ Ver lo que ve la máquina (Debug)",
+        "warn_no_curve": "⚠️ El algoritmo matemático no ve la curva. Calibra colores o usa la IA.",
+        "math_diag_label": "📍 Análisis Geométrico:",
+        "ai_section_title": "🤖 Opinión del Experto",
+        "ai_section_desc": "Consulta a la IA para un análisis clínico detallado.",
+        "btn_analyze": "🔍 Analizar con IA",
+        "ai_success": "Reporte generado exitosamente:",
+        "ai_error_auth": "❌ Error de Permisos: Tu API Key es válida pero no permite visión.",
+        "ai_error_conn": "❌ Error de Conexión.",
+        "math_normal": "Patrón Estable (Geométrico)",
+        "math_normal_desc": "No se detectaron deformaciones obvias matemáticamente.",
+        "math_advice": "Correlacione con la clínica.",
+        "diag_flow_starvation": "Posible Hambre de Flujo",
+        "desc_flow_starvation": "Muesca detectada (Ratio alto).",
+        "adv_flow_starvation": "Considere aumentar flujo o reducir Rise Time.",
+        "diag_double_trigger": "Posible Doble Disparo",
+        "desc_double_trigger": "Valle profundo entre ciclos rápidos.",
+        "adv_double_trigger": "Evalúe Ti neural vs Ti mecánico.",
+        "diag_auto_cycle": "Posible Doble Disparo/Autociclado",
+        "loading_ai": "🤖 Analizando imagen...",
+        "prompt_role": "Actúa como un Médico Intensivista experto en Ventilación Mecánica. Responde SIEMPRE en ESPAÑOL.",
+        "prompt_task": "Analiza esta imagen de pantalla de ventilador. Busca asincronías (Doble Disparo, Hambre de Flujo, etc). Da diagnóstico y recomendación."
+    },
+    "en": {
+        "title": "🫁 Ventilator Lab: Hybrid",
+        "subtitle": "Asynchrony Detection: **Computer Vision + Generative AI**",
+        "sidebar_settings": "⚙️ Settings",
+        "lang_select": "Language",
+        "api_key_label": "🔑 Google API Key",
+        "api_key_help": "Enter your key if no license is configured.",
+        "api_warning": "API Key required for AI features.",
+        "license_ok": "✅ Pro License Active",
+        "api_missing": "⚠️ Missing API Key. Configure in 'Secrets' or sidebar.",
+        "color_calib": "🎨 Color Calibration",
+        "color_info": "Adjust if the curve is not detected.",
+        "curve_type": "Which curve are you analyzing?",
+
+        # --- NEW HELP SECTION ---
+        "help_title": "❓ How to identify the curve?",
+        "help_p_name": "PRESSURE Graph (Paw)",
+        "help_p_desc": "🟢 **Shape:** Goes up and down but **stays above the baseline** (never goes negative). Usually square or triangular.",
+        "help_f_name": "FLOW Graph (Flow)",
+        "help_f_desc": "🔵 **Shape:** Has a wave going Up (Inspiration) and Down (Expiration). **It crosses the zero line.**",
+        # ------------------------
+
+        "opt_pressure": "Pressure (Paw)",
+        "opt_flow": "Flow",
+        "sliders_hue": "Hue (H)",
+        "sliders_sat": "Saturation (S)",
+        "sliders_val": "Value (V)",
+        "camera_label": "📸 Take a picture of the screen",
+        "debug_view": "👁️ Machine Vision View (Debug)",
+        "warn_no_curve": "⚠️ Math algorithm cannot see the curve. Calibrate colors or use AI.",
+        "math_diag_label": "📍 Geometric Analysis:",
+        "ai_section_title": "🤖 Expert Opinion",
+        "ai_section_desc": "Consult AI for detailed clinical analysis.",
+        "btn_analyze": "🔍 Analyze with AI",
+        "ai_success": "Report generated successfully:",
+        "ai_error_auth": "❌ Permission Error: Valid Key but Vision models not allowed.",
+        "ai_error_conn": "❌ Connection Error.",
+        "math_normal": "Stable Pattern (Geometric)",
+        "math_normal_desc": "No obvious deformations detected mathematically.",
+        "math_advice": "Correlate with clinical status.",
+        "diag_flow_starvation": "Possible Flow Starvation",
+        "desc_flow_starvation": "Concavity detected (High Ratio).",
+        "adv_flow_starvation": "Consider increasing flow or reducing Rise Time.",
+        "diag_double_trigger": "Possible Double Trigger",
+        "desc_double_trigger": "Deep valley between fast cycles.",
+        "adv_double_trigger": "Evaluate Neural Ti vs Mechanical Ti.",
+        "diag_auto_cycle": "Possible Double Trigger/Auto-cycling",
+        "loading_ai": "🤖 Analyzing image...",
+        "prompt_role": "Act as an Expert Intensivist in Mechanical Ventilation. Respond ALWAYS in ENGLISH.",
+        "prompt_task": "Analyze this ventilator screen image. Look for asynchronies (Double Trigger, Flow Starvation, etc). Provide diagnosis and recommendation."
+    }
+}
+
+# ==========================================
+# 1. LÓGICA DE IA (ROBUSTA + MULTILINGÜE)
 # ==========================================
 
-def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
-    """
-    Conecta con Google Gemini buscando automáticamente el mejor modelo disponible.
-    """
+def consultar_intensivista_ia(image_bytes, tipo_curva, api_key, lang_code):
+    t = TEXTOS[lang_code]
+    
     if not api_key:
-        return "⚠️ Falta la API Key. Configúrala en los 'Secrets' de Streamlit o en la barra lateral."
+        return t["api_missing"]
 
-    # Configuración
     genai.configure(api_key=api_key)
     image_pil = Image.open(io.BytesIO(image_bytes))
 
-    # Prompt del Sistema (Rol Médico)
     prompt = f"""
-    Actúa como un Médico Intensivista experto en Ventilación Mecánica.
-    Analiza esta imagen de la pantalla de un ventilador (Curva de {tipo_curva}).
+    {t['prompt_role']}
+    Context: {t['curve_type']} {tipo_curva}
     
-    Tareas:
-    1. Valida si la curva es legible.
-    2. Busca asincronías específicas: Doble Disparo, Hambre de Flujo, Ciclado Retrasado, Esfuerzos Inefectivos.
-    3. Describe brevemente la morfología visual que justifica tu hallazgo.
-    4. Da una recomendación clínica concisa y segura.
-    
-    Formato: Responde directamente con el diagnóstico y la recomendación.
+    Task:
+    {t['prompt_task']}
     """
 
-    # --- ESTRATEGIA DE CONEXIÓN ROBUSTA ---
-    # Intentamos listar modelos disponibles para evitar errores 404 por nombres incorrectos
     try:
-        # 1. Obtener modelos disponibles para esta API Key
         lista_modelos = list(genai.list_models())
         modelos_validos = [m.name for m in lista_modelos if 'generateContent' in m.supported_generation_methods]
         
-        # 2. Definir preferencias (del más rápido/nuevo al más compatible)
         preferencias = [
             "models/gemini-1.5-flash",
             "models/gemini-1.5-flash-latest",
@@ -66,42 +162,39 @@ def consultar_intensivista_ia(image_bytes, tipo_curva, api_key):
         ]
         
         modelo_elegido = None
-        
-        # 3. Cruzar preferencias con disponibles
         for pref in preferencias:
             if pref in modelos_validos:
                 modelo_elegido = pref
                 break
         
-        # Fallback de emergencia: usar el primero que haya
         if not modelo_elegido and modelos_validos:
             modelo_elegido = modelos_validos[0]
             
         if not modelo_elegido:
-            return f"❌ Error de Permisos: Tu API Key es válida pero Google no le permite acceder a modelos de visión.\nModelos detectados: {modelos_validos}"
+            return t["ai_error_auth"]
 
-        # 4. Generar Respuesta
         model = genai.GenerativeModel(modelo_elegido)
-        with st.spinner(f'🤖 Analizando con {modelo_elegido}...'):
+        with st.spinner(t['loading_ai']):
             response = model.generate_content([prompt, image_pil])
             return response.text
 
     except Exception as e:
-        return f"❌ Error de Conexión: {str(e)}\n\nVerifica que tu API Key sea válida y tenga crédito/cuota."
+        return f"{t['ai_error_conn']}: {str(e)}"
 
 # ==========================================
-# 2. LÓGICA MATEMÁTICA (OPENCV - FILTROS)
+# 2. LÓGICA MATEMÁTICA
 # ==========================================
 
-def analizar_curva_matematica(signal, tipo_curva, fs=50):
+def analizar_curva_matematica(signal, tipo_curva_key, fs=50, lang_code="es"):
+    t = TEXTOS[lang_code]
+    
     hallazgos = {
-        "diagnostico": "Patrón Estable (Geométrico)",
+        "diagnostico": t["math_normal"],
         "color": "green",
-        "explicacion": "No se detectaron deformaciones obvias en el análisis matemático.",
-        "consejo": "Correlacione con la clínica del paciente."
+        "explicacion": t["math_normal_desc"],
+        "consejo": t["math_advice"]
     }
     
-    # Detección de Picos
     prominencia = 0.15 
     distancia_min = int(0.15 * fs)
     picos, _ = find_peaks(signal, prominence=prominencia, distance=distancia_min)
@@ -109,13 +202,11 @@ def analizar_curva_matematica(signal, tipo_curva, fs=50):
     if len(picos) < 2:
         return hallazgos, picos
 
-    # Análisis de Pares
     for i in range(len(picos) - 1):
         p1 = picos[i]
         p2 = picos[i+1]
         distancia_tiempo = (p2 - p1) / fs
         
-        # Si están muy cerca (< 1 seg)
         if distancia_tiempo < 1.0:
             segmento = signal[p1:p2]
             valle_idx = np.argmin(segmento)
@@ -124,23 +215,23 @@ def analizar_curva_matematica(signal, tipo_curva, fs=50):
             if altura_pico1 == 0: altura_pico1 = 0.001
             ratio_valle = altura_valle / altura_pico1
             
-            if tipo_curva == "Presión":
+            if tipo_curva_key == "pressure":
                 if ratio_valle > 0.6: 
-                    hallazgos["diagnostico"] = "Posible Hambre de Flujo"
+                    hallazgos["diagnostico"] = t["diag_flow_starvation"]
                     hallazgos["color"] = "orange"
-                    hallazgos["explicacion"] = "Muesca detectada (Ratio alto)."
-                    hallazgos["consejo"] = "Considere aumentar flujo o reducir Rise Time."
+                    hallazgos["explicacion"] = t["desc_flow_starvation"]
+                    hallazgos["consejo"] = t["adv_flow_starvation"]
                     return hallazgos, picos
                 elif ratio_valle < 0.5:
-                    hallazgos["diagnostico"] = "Posible Doble Disparo"
+                    hallazgos["diagnostico"] = t["diag_double_trigger"]
                     hallazgos["color"] = "red"
-                    hallazgos["explicacion"] = "Valle profundo entre ciclos rápidos."
-                    hallazgos["consejo"] = "Evalúe Ti neural vs Ti mecánico."
+                    hallazgos["explicacion"] = t["desc_double_trigger"]
+                    hallazgos["consejo"] = t["adv_double_trigger"]
                     return hallazgos, picos
             
-            elif tipo_curva == "Flujo":
+            elif tipo_curva_key == "flow":
                 if ratio_valle < 0.3:
-                    hallazgos["diagnostico"] = "Posible Doble Disparo/Autociclado"
+                    hallazgos["diagnostico"] = t["diag_auto_cycle"]
                     hallazgos["color"] = "red"
                     return hallazgos, picos
 
@@ -151,62 +242,74 @@ def analizar_curva_matematica(signal, tipo_curva, fs=50):
 # ==========================================
 
 def main():
-    st.title("🫁 Ventilator Lab: Híbrido")
-    st.markdown("Diagnóstico de Asincronías: **Visión Artificial + IA Generativa**")
-    
     # --- BARRA LATERAL (CONFIGURACIÓN) ---
-    st.sidebar.header("⚙️ Configuración")
+    st.sidebar.header("🌐 Language / Idioma")
+    idioma_selec = st.sidebar.radio("Select:", ["Español", "English"], horizontal=True)
     
-    # 1. GESTIÓN DE API KEY (SECRETS vs MANUAL)
+    lang = "es" if idioma_selec == "Español" else "en"
+    t = TEXTOS[lang]
+
+    st.title(t["title"])
+    st.markdown(t["subtitle"])
+    
+    st.sidebar.divider()
+    st.sidebar.header(t["sidebar_settings"])
+    
+    # 1. GESTIÓN DE API KEY
     api_key = None
-    
-    # Intentamos leer el 'Secret' del servidor (Producción)
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
-        st.sidebar.success("✅ Licencia Pro Activada")
+        st.sidebar.success(t["license_ok"])
     else:
-        # Si no hay secret, pedimos manual (Desarrollo/Usuario externo)
-        api_key = st.sidebar.text_input("🔑 Google API Key", type="password", help="Introduce tu clave si no tienes licencia configurada.")
+        api_key = st.sidebar.text_input(t["api_key_label"], type="password", help=t["api_key_help"])
         if not api_key:
-            st.sidebar.warning("Se requiere API Key para la IA.")
+            st.sidebar.warning(t["api_warning"])
 
     st.sidebar.divider()
     
-    # 2. CALIBRACIÓN DE COLOR
-    st.sidebar.header("🎨 Calibración de Color")
-    st.sidebar.info("Ajusta si la curva no se detecta.")
+    # 2. CALIBRACIÓN
+    st.sidebar.header(t["color_calib"])
+    st.sidebar.info(t["color_info"])
     
-    tipo = st.radio("¿Qué curva estás analizando?", ["Presión (Paw)", "Flujo (Flow)"], horizontal=True)
+    # 3. SELECCIÓN DE CURVA CON GUÍA
+    st.subheader(t["curve_type"])
 
-    if "Presión" in tipo:
-        def_h, def_s, def_v = (20, 40), (100, 255), (100, 255) # Amarillo
+    # --- NUEVA FUNCIÓN: GUÍA VISUAL ---
+    with st.expander(t["help_title"]):
+        st.info(f"{t['help_p_name']}\n\n{t['help_p_desc']}")
+        st.info(f"{t['help_f_name']}\n\n{t['help_f_desc']}")
+    # ----------------------------------
+
+    opcion_curva = st.radio(" ", [t["opt_pressure"], t["opt_flow"]], horizontal=True, label_visibility="collapsed")
+    
+    tipo_logica = "pressure" if t["opt_pressure"] in opcion_curva else "flow"
+
+    if tipo_logica == "pressure":
+        def_h, def_s, def_v = (20, 40), (100, 255), (100, 255) 
     else:
-        def_h, def_s, def_v = (80, 100), (100, 255), (100, 255) # Azul
+        def_h, def_s, def_v = (80, 100), (100, 255), (100, 255)
 
-    h_min, h_max = st.sidebar.slider(f"Matiz (Hue)", 0, 179, def_h)
-    s_min, s_max = st.sidebar.slider(f"Saturación (Sat)", 0, 255, def_s)
-    v_min, v_max = st.sidebar.slider(f"Brillo (Val)", 0, 255, def_v)
+    h_min, h_max = st.sidebar.slider(t["sliders_hue"], 0, 179, def_h)
+    s_min, s_max = st.sidebar.slider(t["sliders_sat"], 0, 255, def_s)
+    v_min, v_max = st.sidebar.slider(t["sliders_val"], 0, 255, def_v)
 
-    # --- CÁMARA Y PROCESAMIENTO ---
-    imagen = st.camera_input("📸 Toma una foto a la pantalla")
+    # --- CÁMARA ---
+    imagen = st.camera_input(t["camera_label"])
 
     if imagen:
         bytes_data = imagen.getvalue()
         
-        # A. PROCESAMIENTO VISUAL (OPENCV)
         img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
         h, w, _ = img.shape
 
-        # Máscara de color
         lower_color = np.array([h_min, s_min, v_min])
         upper_color = np.array([h_max, s_max, v_max])
         mask = cv2.inRange(hsv, lower_color, upper_color)
 
-        with st.expander("👁️ Ver lo que ve la máquina (Debug)", expanded=False):
-            st.image(mask, caption="Máscara Binaria", use_column_width=True)
+        with st.expander(t["debug_view"], expanded=False):
+            st.image(mask, caption="Mask", use_column_width=True)
 
-        # Extracción de señal
         raw_signal = []
         for col in range(int(w*0.1), int(w*0.9)):
             col_data = mask[:, col]
@@ -217,13 +320,11 @@ def main():
                 val = raw_signal[-1] if len(raw_signal) > 0 else 0
                 raw_signal.append(val)
         
-        # Validación de señal
         signal_valid = True
         if np.max(raw_signal) == 0:
-            st.warning("⚠️ El algoritmo matemático no ve la curva. Intenta calibrar los colores o usa directamente la IA.")
+            st.warning(t["warn_no_curve"])
             signal_valid = False
 
-        # Si hay señal, hacemos análisis matemático
         if signal_valid:
             sig_np = np.array(raw_signal)
             sig_norm = (sig_np - np.min(sig_np)) / (np.max(sig_np) - np.min(sig_np) + 1e-6)
@@ -232,37 +333,35 @@ def main():
             except:
                 sig_smooth = sig_norm
 
-            res_math, picos = analizar_curva_matematica(sig_smooth, tipo.split()[0])
+            res_math, picos = analizar_curva_matematica(sig_smooth, tipo_logica, fs=50, lang_code=lang)
 
-            # Graficar
             fig, ax = plt.subplots(figsize=(10, 3))
             fig.patch.set_facecolor('#0e1117')
             ax.set_facecolor('black')
-            color_linea = 'yellow' if "Presión" in tipo else 'cyan'
+            color_linea = 'yellow' if tipo_logica == "pressure" else 'cyan'
             ax.plot(sig_smooth, color=color_linea, lw=2)
             ax.plot(picos, sig_smooth[picos], "wo", markersize=5)
             ax.axis('off')
             st.pyplot(fig)
             
-            st.caption(f"📍 Análisis Geométrico: **{res_math['diagnostico']}**")
+            st.caption(f"{t['math_diag_label']} **{res_math['diagnostico']}**")
 
-        # B. ANÁLISIS POR IA GENERATIVA
         st.divider()
         col_btn, col_txt = st.columns([1, 2])
         
         with col_txt:
-            st.markdown("### 🤖 Opinión del Experto")
-            st.write("Consulta a la IA para un análisis clínico detallado.")
+            st.markdown(f"### {t['ai_section_title']}")
+            st.write(t["ai_section_desc"])
             
         with col_btn:
-            consultar = st.button("🔍 Analizar con IA", type="primary")
+            consultar = st.button(t["btn_analyze"], type="primary")
 
         if consultar:
-            diagnostico_ia = consultar_intensivista_ia(bytes_data, tipo, api_key)
+            diagnostico_ia = consultar_intensivista_ia(bytes_data, tipo_logica, api_key, lang)
             if "❌" in diagnostico_ia:
                 st.error(diagnostico_ia)
             else:
-                st.success("Reporte generado exitosamente:")
+                st.success(t["ai_success"])
                 st.info(diagnostico_ia)
 
 if __name__ == "__main__":
