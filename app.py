@@ -1,3 +1,14 @@
+# Copyright (c) 2025 Ventilator Lab AI
+#
+# Este software es Propiedad Intelectual Privada y Confidencial.
+# El uso no autorizado, copia, modificación, distribución o ingeniería inversa
+# de este archivo, vía cualquier medio, está estrictamente prohibido.
+#
+# Desarrollado para fines educativos y de soporte a la decisión clínica.
+# No constituye un dispositivo médico certificado.
+#
+# Todos los derechos reservados.
+
 import streamlit as st
 import cv2
 import numpy as np
