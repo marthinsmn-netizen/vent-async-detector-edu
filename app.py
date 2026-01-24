@@ -1,9 +1,6 @@
 # Copyright (c) 2025 Ventilator Lab AI
 #
 # Este software es Propiedad Intelectual Privada y Confidencial.
-# El uso no autorizado, copia, modificación, distribución o ingeniería inversa
-# de este archivo, vía cualquier medio, está estrictamente prohibido.
-#
 # Desarrollado para fines educativos y de soporte a la decisión clínica.
 # No constituye un dispositivo médico certificado.
 #
@@ -18,8 +15,7 @@ import matplotlib
 from PIL import Image
 import io
 import google.generativeai as genai
-import time
-import os  # <--- NUEVO: Para verificar si existe el logo
+import os
 
 # Configuración de Matplotlib para servidores sin pantalla
 matplotlib.use('Agg')
@@ -33,7 +29,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# 0. DICCIONARIO DE IDIOMAS & PROMPTS ROBUSTOS
+# 0. DICCIONARIO DE IDIOMAS & PROMPTS BLINDADOS
 # ==========================================
 TEXTOS = {
     "es": {
@@ -51,407 +47,263 @@ TEXTOS = {
         "curve_type": "¿Qué curva vas a analizar?",
         "help_title": "❓ ¿Cómo saber cuál elegir?",
         "help_p_name": "Gráfica de PRESIÓN (Paw)",
-        "help_p_desc": "🟢 **Forma:** Sube y baja, pero **siempre se mantiene por encima de la línea base** (nunca cruza a negativo). Suele ser cuadrada o triangular.",
+        "help_p_desc": "🟢 Sube y baja, siempre sobre la línea base.",
         "help_f_name": "Gráfica de FLUJO (Flow)",
-        "help_f_desc": "🔵 **Forma:** Tiene una montaña hacia arriba (aire entrando) y una hacia abajo (aire saliendo). **Cruza la línea del cero.**",
+        "help_f_desc": "🔵 Cruza la línea del cero (Inspiración/Espiración).",
         "opt_pressure": "Presión (Paw)",
         "opt_flow": "Flujo (Flow)",
         "sliders_hue": "Matiz (H)",
         "sliders_sat": "Saturación (S)",
         "sliders_val": "Brillo (V)",
         "camera_label": "📸 Toma una foto a la pantalla",
-        "debug_view": "👁️ Ver lo que ve la máquina (Debug)",
-        "warn_no_curve": "⚠️ El algoritmo matemático no ve la curva. Calibra colores o usa la IA.",
+        "debug_view": "👁️ Ver Máscara de Visión (Debug)",
+        "warn_no_curve": "⚠️ El algoritmo matemático no detecta la curva. Calibra o usa la IA.",
         "math_diag_label": "📍 Análisis Geométrico:",
-        "ai_section_title": "🤖 Opinión del Experto",
-        "ai_section_desc": "Consulta a la IA para un análisis clínico detallado.",
+        "ai_section_title": "🤖 Opinión del Experto AI",
+        "ai_section_desc": "Consulta a la IA para un análisis fisiológico detallado.",
         "btn_analyze": "🔍 Analizar con IA",
         "ai_success": "Reporte generado exitosamente:",
-        "ai_error_auth": "❌ Error de Permisos: Tu API Key es válida pero no permite visión.",
+        "ai_error_auth": "❌ Error de Permisos o Modelo Vision no disponible.",
         "ai_error_conn": "❌ Error de Conexión.",
         "math_normal": "Patrón Estable (Geométrico)",
-        "math_normal_desc": "No se detectaron deformaciones obvias matemáticamente.",
+        "math_normal_desc": "No se detectaron deformaciones obvias.",
         "math_advice": "Correlacione con la clínica.",
         "diag_flow_starvation": "Posible Hambre de Flujo",
         "desc_flow_starvation": "Muesca detectada (Ratio alto).",
-        "adv_flow_starvation": "Considere aumentar flujo o reducir Rise Time.",
+        "adv_flow_starvation": "Evalúe aumentar flujo o reducir Rise Time.",
         "diag_double_trigger": "Posible Doble Disparo",
         "desc_double_trigger": "Valle profundo entre ciclos rápidos.",
         "adv_double_trigger": "Evalúe Ti neural vs Ti mecánico.",
         "diag_auto_cycle": "Posible Doble Disparo/Autociclado",
-        "loading_ai": "🤖 El Experto está analizando la morfología...",
+        "loading_ai": "🤖 El Experto está analizando la fisiología...",
         "prompt_system": """
         Actúa como un Auditor Clínico Senior especialista en Ventilación Mecánica y Análisis Gráfico.
-        Tu objetivo es identificar asincronías complejas con precisión quirúrgica, minimizando falsos positivos.
+        Tu objetivo es identificar asincronías complejas con precisión quirúrgica.
         Responde SIEMPRE en ESPAÑOL.
         """,
         "prompt_instructions": """
-        Analiza la imagen adjunta siguiendo estrictamente este PROTOCOLO DE RAZONAMIENTO CLÍNICO:
-
-        --- PASO 1: CONTROL DE CALIDAD Y TIPO ---
-        1. ¿La imagen muestra claramente una pantalla de ventilador? Si es ilegible, detente y responde "Imagen no diagnóstica".
-        2. El usuario indica que es una curva de: **{tipo_curva}**.
-           - Verifica visualmente: 
-             * Si es PRESIÓN: Debe ser siempre positiva (sobre la línea base). Forma cuadrada o constante (PCV) o triangular y descendente (VCV).
-             * Si es FLUJO: Debe tener fase positiva (inspiración) y negativa (espiración), cruzando el cero.
-           - Si la imagen NO coincide con el tipo indicado, adviértelo primero.
-
-        --- PASO 2: ESCANEO DE ASINCRONÍAS (BÚSQUEDA DIRIGIDA) ---
-        Busca **exclusivamente** patrones que coincidan con estas definiciones morfológicas:
-
-        A. DOBLE DISPARO (Double Trigger):
-           - Definición Visual: Dos ciclos inspiratorios consecutivos separados por un tiempo muy breve (< 1 seg), sin retorno a la línea base o con exhalación incompleta entre ellos.
-           - Contexto: Común en Flujo y Presión.
-
-        B. FLUJO INSUFICIENTE (Flow Starvation) - *Solo evaluar si es curva de PRESIÓN*:
-           - Definición Visual: Busca una "muesca", "concavidad" o deformación hacia abajo en la rama inspiratoria (la presión cae o se aplana cuando debería subir). La curva parece una "cuchara" o letra M deformada.
-           - NO confundir con el descenso inicial de presión en modos disparados por presión.
-
-        C. CICLADO PREMATURO (Early Cycling) - *Solo evaluar si es curva de FLUJO*:
-           - Definición Visual: El flujo inspiratorio cae a cero abruptamente. Inmediatamente después, en la fase espiratoria (negativa), aparece una pequeña deflexión/pico hacia la línea base (como si el paciente intentara seguir tomando aire) antes de completar la exhalación.
+        Analiza la imagen siguiendo este protocolo de razonamiento:
         
-        D. ESFUERZOS INEFECTIVOS (Ineffective Efforts) - *Solo evaluar si es curva de FLUJO*:
-           - Definición Visual: Durante la fase espiratoria (parte negativa), se observan pequeñas "montañitas" o deflexiones positivas que se acercan a la línea cero pero NO logran disparar un nuevo ciclo.
-
-        --- PASO 3: DICTAMEN FINAL ---
-        - Sé conservador. Si la curva se ve limpia y sincrónica, diagnostica "Patrón Sincrónico / Normal".
-        - Si detectas una asincronía, justifica tu respuesta describiendo la forma visual (ej: "Se observa concavidad en el tercio medio...").
-
-        FORMATO DE SALIDA (Usa Markdown):
-        ### 🏥 Diagnóstico: [NOMBRE DE LA ASINCRONÍA o "TRAZO NORMAL"]
-        **🔎 Hallazgo Visual:** [Descripción técnica de la morfología detectada]
-        **💡 Acción Clínica:** [Recomendación breve para corregirlo]
+        1. ANÁLISIS DE SEÑAL: Identifica si la curva es de **{tipo_curva}**. Describe brevemente la morfología (ej. ondas cuadradas, rampa ascendente).
+        2. BÚSQUEDA DE MARCADORES:
+           - DOBLE DISPARO: Dos ciclos seguidos con exhalación incompleta.
+           - HAMBRE DE FLUJO (Solo en PRESIÓN): Busca concavidad ("scooping") en la rama inspiratoria.
+           - CICLADO PREMATURO (Solo en FLUJO): Pico positivo al inicio de la espiración.
+           - ESFUERZOS INEFECTIVOS: Deflexiones positivas en fase espiratoria que no disparan ciclo.
+        3. EXCLUSIÓN: Si hay mucho ruido o secreciones (ondas en serrucho), indícalo.
+        
+        FORMATO:
+        ### 🏥 Diagnóstico Clínico: [Nombre o Trazo Normal]
+        **🧐 Evidencia Morfológica:** [Descripción técnica de lo detectado]
+        **🩺 Sugerencia Terapéutica:** [Recomendación clínica breve]
         """
     },
-    
     "en": {
         "title": "🫁 Ventilator Lab: Hybrid",
-        "subtitle": "Asynchrony Detection: **Computer Vision + Generative AI**",
+        "subtitle": "Asynchrony Detection: **Computer Vision + AI**",
         "sidebar_settings": "⚙️ Settings",
         "lang_select": "Language",
         "api_key_label": "🔑 Google API Key",
-        "api_key_help": "Enter your key if no license is configured.",
-        "api_warning": "API Key required for AI features.",
+        "api_key_help": "Enter your API Key.",
+        "api_warning": "API Key required.",
         "license_ok": "✅ Pro License Active",
-        "api_missing": "⚠️ Missing API Key. Configure in 'Secrets' or sidebar.",
+        "api_missing": "⚠️ Missing API Key.",
         "color_calib": "🎨 Color Calibration",
-        "color_info": "Adjust if the curve is not detected.",
-        "curve_type": "Which curve are you analyzing?",
-        "help_title": "❓ How to identify the curve?",
-        "help_p_name": "PRESSURE Graph (Paw)",
-        "help_p_desc": "🟢 **Shape:** Goes up and down but **stays above the baseline** (never goes negative). Usually square or triangular.",
-        "help_f_name": "FLOW Graph (Flow)",
-        "help_f_desc": "🔵 **Shape:** Has a wave going Up (Inspiration) and Down (Expiration). **It crosses the zero line.**",
+        "color_info": "Adjust sliders to isolate the curve.",
+        "curve_type": "Curve Type",
+        "help_title": "❓ How to choose?",
+        "help_p_name": "PRESSURE Graph",
+        "help_p_desc": "🟢 Always stays above baseline.",
+        "help_f_name": "FLOW Graph",
+        "help_f_desc": "🔵 Crosses zero line (In/Out).",
         "opt_pressure": "Pressure (Paw)",
         "opt_flow": "Flow",
         "sliders_hue": "Hue (H)",
         "sliders_sat": "Saturation (S)",
         "sliders_val": "Value (V)",
-        "camera_label": "📸 Take a picture of the screen",
-        "debug_view": "👁️ Machine Vision View (Debug)",
-        "warn_no_curve": "⚠️ Math algorithm cannot see the curve. Calibrate colors or use AI.",
+        "camera_label": "📸 Snapshot ventilator screen",
+        "debug_view": "👁️ Debug Vision",
+        "warn_no_curve": "⚠️ Curve not detected mathematically.",
         "math_diag_label": "📍 Geometric Analysis:",
-        "ai_section_title": "🤖 Expert Opinion",
-        "ai_section_desc": "Consult AI for detailed clinical analysis.",
+        "ai_section_title": "🤖 AI Expert Opinion",
+        "ai_section_desc": "Detailed physiological analysis.",
         "btn_analyze": "🔍 Analyze with AI",
-        "ai_success": "Report generated successfully:",
-        "ai_error_auth": "❌ Permission Error: Valid Key but Vision models not allowed.",
+        "ai_success": "Report generated:",
+        "ai_error_auth": "❌ Auth Error.",
         "ai_error_conn": "❌ Connection Error.",
-        "math_normal": "Stable Pattern (Geometric)",
-        "math_normal_desc": "No obvious deformations detected mathematically.",
-        "math_advice": "Correlate with clinical status.",
+        "math_normal": "Stable Pattern",
+        "math_normal_desc": "No major geometric issues.",
+        "math_advice": "Correlate with patient status.",
         "diag_flow_starvation": "Possible Flow Starvation",
-        "desc_flow_starvation": "Concavity detected (High Ratio).",
-        "adv_flow_starvation": "Consider increasing flow or reducing Rise Time.",
+        "desc_flow_starvation": "Concavity detected.",
+        "adv_flow_starvation": "Check flow settings.",
         "diag_double_trigger": "Possible Double Trigger",
-        "desc_double_trigger": "Deep valley between fast cycles.",
-        "adv_double_trigger": "Evaluate Neural Ti vs Mechanical Ti.",
-        "diag_auto_cycle": "Possible Double Trigger/Auto-cycling",
-        "loading_ai": "🤖 Expert is analyzing morphology...",
-        "prompt_system": """
-        Act as a Senior Clinical Auditor specializing in Mechanical Ventilation and Waveform Analysis.
-        Your goal is to identify complex asynchronies with surgical precision, minimizing false positives.
-        Respond ALWAYS in ENGLISH.
-        """,
+        "desc_double_trigger": "Incomplete exhalation between cycles.",
+        "adv_double_trigger": "Evaluate patient comfort/sedation.",
+        "diag_auto_cycle": "Auto-cycling/Double Trigger",
+        "loading_ai": "🤖 Analyzing morphology...",
+        "prompt_system": "Act as a Senior Clinical Auditor in Mechanical Ventilation. Respond in ENGLISH.",
         "prompt_instructions": """
-        Analyze the attached image following this strict CLINICAL REASONING PROTOCOL:
-
-        --- STEP 1: QUALITY & TYPE CHECK ---
-        1. Does the image clearly show a ventilator screen? If unreadable, stop and reply "Non-diagnostic image".
-        2. The user states this is a: **{tipo_curva}** curve.
-           - Visually verify: 
-             * If PRESSURE: Must be always positive (above baseline). Square (PCV) or Triangular (VCV) shape.
-             * If FLOW: Must have positive (insp) and negative (exp) phases, crossing zero.
-           - If the image DOES NOT match the type, warn the user first.
-
-        --- STEP 2: ASYNCHRONY SCAN (TARGETED SEARCH) ---
-        Look **exclusively** for patterns matching these morphological definitions:
-
-        A. DOUBLE TRIGGER:
-           - Visual Definition: Two consecutive inspiratory cycles separated by a very brief time (< 1 sec), without return to baseline or with incomplete exhalation between them.
-
-        B. FLOW STARVATION - *Evaluate only if PRESSURE curve*:
-           - Visual Definition: Look for a "notch", "scooping", or concavity in the inspiratory limb (pressure drops or flattens when it should rise). The curve looks like a "spoon" or deformed M.
-
-        C. EARLY CYCLING - *Evaluate only if FLOW curve*:
-           - Visual Definition: Inspiratory flow drops to zero abruptly. Immediately after, in the expiratory phase (negative), a small deflection/spike appears towards the baseline (as if the patient tried to continue inhaling) before completing exhalation.
+        Analyze image:
+        1. SIGNAL: Is it **{tipo_curva}**? Describe morphology.
+        2. MARKERS: Double Trigger, Flow Starvation (Pressure only), Early Cycling (Flow only), Ineffective Efforts.
+        3. EXCLUSION: Check for noise/secretions.
         
-        D. INEFFECTIVE EFFORTS - *Evaluate only if FLOW curve*:
-           - Visual Definition: During the expiratory phase (negative part), small "mounds" or positive deflections are observed approaching the zero line but NOT triggering a new cycle.
-
-        --- STEP 3: FINAL VERDICT ---
-        - Be conservative. If the curve looks clean and synchronous, diagnose "Synchronous / Normal Pattern".
-        - If an asynchrony is detected, justify your answer by describing the visual shape (e.g., "Concavity observed in the middle third...").
-
-        OUTPUT FORMAT (Use Markdown):
-        ### 🏥 Diagnosis: [ASYNCHRONY NAME or "NORMAL TRACE"]
-        **🔎 Visual Finding:** [Technical description of morphology detected]
-        **💡 Clinical Action:** [Brief recommendation to fix it]
+        FORMAT:
+        ### 🏥 Clinical Diagnosis: [Name]
+        **🧐 Morphological Evidence:** [Technical description]
+        **🩺 Clinical Suggestion:** [Action]
         """
     }
 }
 
 # ==========================================
-# 1. LÓGICA DE IA (ROBUSTA + MULTILINGÜE)
+# 1. LÓGICA DE IA (OPTIMIZADA)
 # ==========================================
 
 def consultar_intensivista_ia(image_bytes, tipo_curva, api_key, lang_code):
     t = TEXTOS[lang_code]
-    
-    if not api_key:
-        return t["api_missing"]
+    if not api_key: return t["api_missing"]
 
     genai.configure(api_key=api_key)
+    
+    # Pre-procesamiento: Reducir tamaño para velocidad y cuota
     image_pil = Image.open(io.BytesIO(image_bytes))
+    image_pil.thumbnail((1200, 1200)) # Optimización de carga
 
-    # Construcción del Prompt con Variables
     instrucciones = t['prompt_instructions'].format(tipo_curva=tipo_curva)
-    
-    prompt_completo = f"""
-    {t['prompt_system']}
-    
-    INPUT DATA:
-    {instrucciones}
-    """
+    prompt_completo = f"{t['prompt_system']}\n\nINPUT:\n{instrucciones}"
 
     try:
-        lista_modelos = list(genai.list_models())
-        modelos_validos = [m.name for m in lista_modelos if 'generateContent' in m.supported_generation_methods]
+        modelos_disponibles = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        prioridad = ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-pro-vision"]
         
-        preferencias = [
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-flash-latest",
-            "models/gemini-1.5-pro",
-            "models/gemini-pro-vision",
-            "models/gemini-pro"
-        ]
+        modelo_final = next((m for m in prioridad if m in modelos_disponibles), modelos_disponibles[0])
+        model = genai.GenerativeModel(modelo_final)
         
-        modelo_elegido = None
-        for pref in preferencias:
-            if pref in modelos_validos:
-                modelo_elegido = pref
-                break
-        
-        if not modelo_elegido and modelos_validos:
-            modelo_elegido = modelos_validos[0]
-            
-        if not modelo_elegido:
-            return t["ai_error_auth"]
-
-        model = genai.GenerativeModel(modelo_elegido)
         with st.spinner(t['loading_ai']):
-            response = model.generate_content([prompt_completo, image_pil])
+            response = model.generate_content([prompt_completo, image_pil], generation_config={"temperature": 0.1})
             return response.text
-
     except Exception as e:
         return f"{t['ai_error_conn']}: {str(e)}"
 
 # ==========================================
-# 2. LÓGICA MATEMÁTICA
+# 2. LÓGICA MATEMÁTICA (ANTI-RUIDO)
 # ==========================================
 
 def analizar_curva_matematica(signal, tipo_curva_key, fs=50, lang_code="es"):
     t = TEXTOS[lang_code]
+    hallazgos = {"diagnostico": t["math_normal"], "color": "green", "explicacion": t["math_normal_desc"], "consejo": t["math_advice"]}
     
-    hallazgos = {
-        "diagnostico": t["math_normal"],
-        "color": "green",
-        "explicacion": t["math_normal_desc"],
-        "consejo": t["math_advice"]
-    }
-    
-    prominencia = 0.15 
-    distancia_min = int(0.15 * fs)
-    picos, _ = find_peaks(signal, prominence=prominencia, distance=distancia_min)
-    
-    if len(picos) < 2:
-        return hallazgos, picos
+    picos, _ = find_peaks(signal, prominence=0.15, distance=int(0.15 * fs))
+    if len(picos) < 2: return hallazgos, picos
 
     for i in range(len(picos) - 1):
-        p1 = picos[i]
-        p2 = picos[i+1]
-        distancia_tiempo = (p2 - p1) / fs
+        p1, p2 = picos[i], picos[i+1]
+        distancia_t = (p2 - p1) / fs
         
-        if distancia_tiempo < 1.0:
+        if distancia_t < 1.0:
             segmento = signal[p1:p2]
-            valle_idx = np.argmin(segmento)
-            altura_valle = segmento[valle_idx]
-            altura_pico1 = signal[p1]
-            if altura_pico1 == 0: altura_pico1 = 0.001
-            ratio_valle = altura_valle / altura_pico1
+            ratio_valle = np.min(segmento) / (signal[p1] + 1e-6)
             
             if tipo_curva_key == "pressure":
-                if ratio_valle > 0.6: 
-                    hallazgos["diagnostico"] = t["diag_flow_starvation"]
-                    hallazgos["color"] = "orange"
-                    hallazgos["explicacion"] = t["desc_flow_starvation"]
-                    hallazgos["consejo"] = t["adv_flow_starvation"]
+                if ratio_valle > 0.65: # Muesca alta
+                    hallazgos.update({"diagnostico": t["diag_flow_starvation"], "color": "orange", "explicacion": t["desc_flow_starvation"], "consejo": t["adv_flow_starvation"]})
                     return hallazgos, picos
-                elif ratio_valle < 0.5:
-                    hallazgos["diagnostico"] = t["diag_double_trigger"]
-                    hallazgos["color"] = "red"
-                    hallazgos["explicacion"] = t["desc_double_trigger"]
-                    hallazgos["consejo"] = t["adv_double_trigger"]
+                elif ratio_valle < 0.45: # Doble disparo
+                    hallazgos.update({"diagnostico": t["diag_double_trigger"], "color": "red", "explicacion": t["desc_double_trigger"], "consejo": t["adv_double_trigger"]})
                     return hallazgos, picos
-            
-            elif tipo_curva_key == "flow":
-                if ratio_valle < 0.3:
-                    hallazgos["diagnostico"] = t["diag_auto_cycle"]
-                    hallazgos["color"] = "red"
-                    return hallazgos, picos
+            elif tipo_curva_key == "flow" and ratio_valle < 0.3:
+                hallazgos.update({"diagnostico": t["diag_auto_cycle"], "color": "red"})
+                return hallazgos, picos
 
     return hallazgos, picos
 
 # ==========================================
-# 3. INTERFAZ DE USUARIO (MAIN)
+# 3. INTERFAZ PRINCIPAL
 # ==========================================
 
 def main():
-    # --- BARRA LATERAL (CONFIGURACIÓN) ---
+    if os.path.exists("logo.png"): st.sidebar.image("logo.png")
     
-    # 1. MOSTRAR LOGO SI EXISTE
-    # Busca 'logo.png' en la raíz. Si no está, no pasa nada.
-    if os.path.exists("logo.png"):
-        st.sidebar.image("logo.png", use_column_width=True)
-    
-    st.sidebar.header("🌐 Language / Idioma")
-    idioma_selec = st.sidebar.radio("Select:", ["Español", "English"], horizontal=True)
-    
-    lang = "es" if idioma_selec == "Español" else "en"
+    st.sidebar.header("🌐 Language")
+    idioma = st.sidebar.radio("Select:", ["Español", "English"], horizontal=True)
+    lang = "es" if idioma == "Español" else "en"
     t = TEXTOS[lang]
 
     st.title(t["title"])
     st.markdown(t["subtitle"])
     
-    st.sidebar.divider()
-    st.sidebar.header(t["sidebar_settings"])
-    
-    # 2. GESTIÓN DE API KEY
-    api_key = None
-    if "GOOGLE_API_KEY" in st.secrets:
-        api_key = st.secrets["GOOGLE_API_KEY"]
-        st.sidebar.success(t["license_ok"])
-    else:
-        api_key = st.sidebar.text_input(t["api_key_label"], type="password", help=t["api_key_help"])
-        if not api_key:
-            st.sidebar.warning(t["api_warning"])
+    # API Key management
+    api_key = st.secrets.get("GOOGLE_API_KEY") or st.sidebar.text_input(t["api_key_label"], type="password")
+    if api_key: st.sidebar.success(t["license_ok"])
+    else: st.sidebar.warning(t["api_warning"])
 
     st.sidebar.divider()
-    
-    # 3. CALIBRACIÓN
     st.sidebar.header(t["color_calib"])
-    st.sidebar.info(t["color_info"])
     
-    # 4. SELECCIÓN DE CURVA
+    # Curva y Calibración
     st.subheader(t["curve_type"])
+    opcion = st.radio(" ", [t["opt_pressure"], t["opt_flow"]], horizontal=True, label_visibility="collapsed")
+    tipo_logic = "pressure" if t["opt_pressure"] in opcion else "flow"
 
-    with st.expander(t["help_title"]):
-        st.info(f"{t['help_p_name']}\n\n{t['help_p_desc']}")
-        st.info(f"{t['help_f_name']}\n\n{t['help_f_desc']}")
-
-    opcion_curva = st.radio(" ", [t["opt_pressure"], t["opt_flow"]], horizontal=True, label_visibility="collapsed")
-    
-    tipo_logica = "pressure" if t["opt_pressure"] in opcion_curva else "flow"
-
-    if tipo_logica == "pressure":
-        def_h, def_s, def_v = (20, 40), (100, 255), (100, 255) 
-    else:
-        def_h, def_s, def_v = (80, 100), (100, 255), (100, 255)
-
+    # Presets inteligentes de color
+    def_h = (20, 45) if tipo_logic == "pressure" else (80, 105)
     h_min, h_max = st.sidebar.slider(t["sliders_hue"], 0, 179, def_h)
-    s_min, s_max = st.sidebar.slider(t["sliders_sat"], 0, 255, def_s)
-    v_min, v_max = st.sidebar.slider(t["sliders_val"], 0, 255, def_v)
+    s_min, s_max = st.sidebar.slider(t["sliders_sat"], 0, 255, (100, 255))
+    v_min, v_max = st.sidebar.slider(t["sliders_val"], 0, 255, (100, 255))
 
-    # --- CÁMARA ---
-    imagen = st.camera_input(t["camera_label"])
+    input_img = st.camera_input(t["camera_label"])
 
-    if imagen:
-        bytes_data = imagen.getvalue()
-        
+    if input_img:
+        bytes_data = input_img.getvalue()
         img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        h, w, _ = img.shape
+        h_px, w_px, _ = img.shape
 
-        lower_color = np.array([h_min, s_min, v_min])
-        upper_color = np.array([h_max, s_max, v_max])
-        mask = cv2.inRange(hsv, lower_color, upper_color)
+        mask = cv2.inRange(hsv, np.array([h_min, s_min, v_min]), np.array([h_max, s_max, v_max]))
+        
+        with st.expander(t["debug_view"]): st.image(mask)
 
-        with st.expander(t["debug_view"], expanded=False):
-            st.image(mask, caption="Mask", use_column_width=True)
-
-        raw_signal = []
-        for col in range(int(w*0.1), int(w*0.9)):
+        # Extracción de señal con filtro de continuidad
+        signal = []
+        last_val = 0
+        for col in range(int(w_px*0.1), int(w_px*0.9)):
             col_data = mask[:, col]
             if np.max(col_data) > 0:
-                y_pos = h - np.argmax(col_data)
-                raw_signal.append(y_pos)
+                current_val = h_px - np.argmax(col_data)
+                # Anti-salto: si el cambio es > 30% del alto, ignorar reflejo
+                if len(signal) > 0 and abs(current_val - last_val) > (h_px * 0.3):
+                    signal.append(last_val)
+                else:
+                    signal.append(current_val)
+                    last_val = current_val
             else:
-                val = raw_signal[-1] if len(raw_signal) > 0 else 0
-                raw_signal.append(val)
-        
-        signal_valid = True
-        if np.max(raw_signal) == 0:
-            st.warning(t["warn_no_curve"])
-            signal_valid = False
+                signal.append(last_val)
 
-        if signal_valid:
-            sig_np = np.array(raw_signal)
-            sig_norm = (sig_np - np.min(sig_np)) / (np.max(sig_np) - np.min(sig_np) + 1e-6)
-            try:
-                sig_smooth = savgol_filter(sig_norm, 31, 3)
-            except:
-                sig_smooth = sig_norm
+        if np.max(signal) > 0:
+            sig_norm = (np.array(signal) - np.min(signal)) / (np.max(signal) - np.min(signal) + 1e-6)
+            try: sig_clean = savgol_filter(sig_norm, 31, 3)
+            except: sig_clean = sig_norm
 
-            res_math, picos = analizar_curva_matematica(sig_smooth, tipo_logica, fs=50, lang_code=lang)
+            res_m, pks = analizar_curva_matematica(sig_clean, tipo_logic, lang_code=lang)
 
-            fig, ax = plt.subplots(figsize=(10, 3))
+            # Gráfico estilo monitor
+            fig, ax = plt.subplots(figsize=(10, 2.5))
             fig.patch.set_facecolor('#0e1117')
             ax.set_facecolor('black')
-            color_linea = 'yellow' if tipo_logica == "pressure" else 'cyan'
-            ax.plot(sig_smooth, color=color_linea, lw=2)
-            ax.plot(picos, sig_smooth[picos], "wo", markersize=5)
+            ax.plot(sig_clean, color=('yellow' if tipo_logic == "pressure" else 'cyan'), lw=2)
+            ax.plot(pks, sig_clean[pks], "ro" if res_m['color'] != "green" else "wo", markersize=4)
             ax.axis('off')
             st.pyplot(fig)
-            
-            st.caption(f"{t['math_diag_label']} **{res_math['diagnostico']}**")
+            st.caption(f"{t['math_diag_label']} **{res_m['diagnostico']}**")
+        else:
+            st.warning(t["warn_no_curve"])
 
         st.divider()
-        col_btn, col_txt = st.columns([1, 2])
-        
-        with col_txt:
-            st.markdown(f"### {t['ai_section_title']}")
-            st.write(t["ai_section_desc"])
-            
-        with col_btn:
-            consultar = st.button(t["btn_analyze"], type="primary")
-
-        if consultar:
-            diagnostico_ia = consultar_intensivista_ia(bytes_data, tipo_logica, api_key, lang)
-            if "❌" in diagnostico_ia:
-                st.error(diagnostico_ia)
-            else:
-                st.success(t["ai_success"])
-                st.info(diagnostico_ia)
+        if st.button(t["btn_analyze"], type="primary", use_container_width=True):
+            reporte = consultar_intensivista_ia(bytes_data, tipo_logic, api_key, lang)
+            st.markdown(reporte)
 
 if __name__ == "__main__":
     main()
