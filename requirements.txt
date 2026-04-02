@@ -1,5 +1,7 @@
-libgl1
-libglx-mesa0
-libegl1
-libxext6
-libxrender1
+streamlit
+numpy
+matplotlib
+scipy
+opencv-python-headless
+Pillow
+google-generativeai>=0.8.3
